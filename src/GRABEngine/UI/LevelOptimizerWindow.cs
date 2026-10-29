@@ -18,7 +18,12 @@ public sealed class LevelOptimizerWindow : Window
     private readonly ListBox _issues = new();
     private readonly TextBlock _result = new() { Foreground = Theme.Dim, FontSize = 11, TextWrapping = TextWrapping.Wrap };
     private readonly CheckBox _merge = Theme.Check("Merge adjacent identical cubes", true);
+    private readonly CheckBox _mergeMixed = Theme.Check("Merge different block sizes on a shared grid", true);
+    private readonly ComboBox _mixedGrid = Theme.Combo(new[] { "0.25 m", "0.5 m", "1 m", "2 m", "4 m" }, 2);
     private readonly CheckBox _cull = Theme.Check("Remove fully enclosed blocks", true);
+    private readonly CheckBox _duplicates = Theme.Check("Remove exact duplicate blocks", true);
+    private readonly CheckBox _degenerate = Theme.Check("Remove zero-size blocks", true);
+    private readonly CheckBox _emptyGroups = Theme.Check("Remove empty groups", false);
     private readonly CheckBox _protect = Theme.Check("Protect physics groups and locked objects", true);
     private int _lastObjectCount;
 
@@ -116,9 +121,15 @@ public sealed class LevelOptimizerWindow : Window
         right.Children.Add(_issues);
         right.Children.Add(Theme.SectionHeader("OPTIMISATION"));
         right.Children.Add(_merge);
+        right.Children.Add(_mergeMixed);
+        right.Children.Add(Theme.Row("Grid", _mixedGrid, 92));
         right.Children.Add(_cull);
+        right.Children.Add(_duplicates);
+        right.Children.Add(_degenerate);
+        right.Children.Add(_emptyGroups);
         right.Children.Add(_protect);
-        right.Children.Add(Theme.Hint("Only axis-aligned cubes with identical material, colour and flags are merged. Animated objects, scripts, locked objects and physics groups are never modified."));
+        right.Children.Add(Theme.Hint("Mixed-size merging rebuilds identical-material blocks on the selected grid, so a tall terrain column and its cap can become one block. Merging runs before culling, so a solid region can collapse to one large block first. Animated objects, scripts, locked objects and physics groups are never modified."));
+        _mixedGrid.SelectionChanged += (_, _) => { if (_mergeMixed.IsChecked == true) _merge.IsChecked = false; };
         right.Children.Add(_result);
         var note = new TextBlock
         {
@@ -173,7 +184,13 @@ public sealed class LevelOptimizerWindow : Window
 
     private void RunOptimizer()
     {
-        if (_merge.IsChecked != true && _cull.IsChecked != true)
+        bool merge = _merge.IsChecked == true;
+        bool mergeMixed = _mergeMixed.IsChecked == true;
+        bool cull = _cull.IsChecked == true;
+        bool duplicates = _duplicates.IsChecked == true;
+        bool degenerate = _degenerate.IsChecked == true;
+        bool emptyGroups = _emptyGroups.IsChecked == true;
+        if (!merge && !mergeMixed && !cull && !duplicates && !degenerate && !emptyGroups)
         {
             _result.Text = "Choose at least one optimisation.";
             _result.Foreground = Theme.Warning;
@@ -181,8 +198,20 @@ public sealed class LevelOptimizerWindow : Window
         }
         try
         {
-            var result = LevelOptimizer.Optimize(_level, _merge.IsChecked == true,
-                _cull.IsChecked == true, _protect.IsChecked == true);
+            double grid = _mixedGrid.SelectedIndex switch { 0 => 0.25, 1 => 0.5, 3 => 2.0, 4 => 4.0, _ => 1.0 };
+            var result = LevelOptimizer.Optimize(_level, new LevelOptimizeOptions
+            {
+                MergeAdjacentCubes = merge,
+                MergeMixedSizes = mergeMixed,
+                MixedSizeGrid = grid,
+                CullHiddenBlocks = cull,
+                RemoveDuplicateBlocks = duplicates,
+                RemoveDegenerateBlocks = degenerate,
+                RemoveEmptyGroups = emptyGroups,
+                ProtectPhysics = _protect.IsChecked == true,
+                ProtectLocked = _protect.IsChecked == true,
+                ProtectAnimated = true
+            });
             _result.Text = result.Summary;
             _result.Foreground = Theme.Ok;
             _applied(result);

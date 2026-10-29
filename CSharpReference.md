@@ -2257,10 +2257,17 @@ compiling, recompile so `GameObject.Find` rebuilds the connection.
 
 GRAB limits one Code Block to 150 instructions and 10 connections. GRAB ENGINE does **not**
 reject a script merely because its total is larger than one page. It splits the update loop into
-pages and creates extra Code Blocks automatically. The split happens between statements, so a
-single oversized statement still has to fit on one page.
+pages and creates extra Code Blocks automatically. The splitter now checks both budgets before
+compiling each statement: it breaks the page when the next statement would exceed the
+instruction budget **or** when it would add a scene object connection that no longer fits. This
+is what keeps a large script with many `GameObject.Find` bindings from failing with “Page N
+needs 11 connections”. The split still happens between statements, so a single oversized
+statement has to fit on one page.
 
 * One page holds as much of the loop as fits; the rest continues on the next page.
+* Event dispatcher connections for `OnTriggerEnter` / `Exit` / `Stay` / `OnSignal` are reserved
+  before the final body page is closed. If the body fills the page, the dispatcher starts on a
+  fresh continuation page instead of dropping trigger events with a warning.
 * Pages share values through hidden generated **GASM Bus** objects (`GASM Bus 1`,
   `GASM Bus 2`, …) parked far below the level. A typical script needs one bus; very large scripts
   add more when the spill space runs out.
@@ -2276,9 +2283,10 @@ single oversized statement still has to fit on one page.
 * Editing the script regenerates the pages. If the script fits in one block again, old pages are
   deactivated and removed from the exported active programs.
 * Because the bus consumes one connection, each page can reference at most **9 scene objects**
-  (or fewer if player, lobby or other connections are used). Generated spill buses can also use
-  connections in state-heavy scripts. If one page still needs too many, reduce the objects that
-  a single statement touches or move that statement to another Code Block.
+  (or fewer if player, lobby or other connections are used). The splitter reserves the bus and
+  starts a new page before a statement that would add another object. Generated spill buses can
+  also use connections in state-heavy scripts. If one page still needs too many, reduce the
+  objects that a single statement touches or move that statement to another Code Block.
 * The split applies to `Update()` (or to `Start()` when the script has no update loop). A
   `Start()` that must run before a separate update loop has to fit in one block on its own.
 * A single statement must fit in one page. A huge loop or an extremely long sign write is

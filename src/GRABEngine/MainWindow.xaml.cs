@@ -11,6 +11,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Media.Media3D;
 using System.Windows.Threading;
+using GrabEngine.AI;
 using GrabEngine.Audio;
 using GrabEngine.Code;
 using GrabEngine.Controls;
@@ -57,6 +58,8 @@ public partial class MainWindow : Window
     private string _lastExportPath = "";
     private BlockBrushMode _lastBrushMode = BlockBrushMode.Fill;
     private bool _syncingBrushUi;
+    private bool _syncingTerrainUi;
+    private readonly BlockPaletteState _blockPalette = BlockPalette.Load();
     private DocsWindow? _docsWindow;
     private AnimationPanel? _animationPanel;
     private PrefabInfo? _stampPrefab;
@@ -75,6 +78,7 @@ public partial class MainWindow : Window
         Scene.NodePlaced += Scene_NodePlaced;
         Scene.DeleteRequested += DeleteSelected;
         Scene.BrushApplied += Scene_BrushApplied;
+        Scene.TerrainSculpted += Scene_TerrainSculpted;
         Scene.PrefabStampRequested += Scene_PrefabStampRequested;
         Scene.BuildHeightChanged += height =>
         {
@@ -103,7 +107,7 @@ public partial class MainWindow : Window
         _autosaveTimer.Tick += (_, _) => AutoSave();
         _autosaveTimer.Start();
         bool automation = Environment.GetCommandLineArgs().Any(a =>
-            a is "--shot" or "--shot-animation" or "--shot-window" or "--selftest" or "--shot-play" or "--shot-brush" or "--shot-build");
+            a is "--shot" or "--shot-animation" or "--shot-window" or "--shot-project" or "--selftest" or "--shot-play" or "--shot-brush" or "--shot-build");
         if (!automation) Loaded += (_, _) => CheckAutosaveRecovery();
         _animationPanel = new AnimationPanel(new AnimationWindowContext
         {
@@ -127,6 +131,7 @@ public partial class MainWindow : Window
         LoadLevel(GrabLevel.CreateDefault(), null);
         InitializeBrushPalette();
         InitializeBuildPalette();
+        InitializeTerrainPalette();
         Log("GRAB ENGINE ready. Real GRAB assets loaded from the game install.");
         Log("F5 play  •  F7 compile  •  Ctrl+S save project  •  Ctrl+E export .level");
         Log("Block brush: B, then Fill / Replace / Erase / Line / Box / Sphere");
@@ -526,6 +531,24 @@ public partial class MainWindow : Window
         palette.ShowDialog();
     }
     private void AudioStudio_Click(object sender, RoutedEventArgs e) => OpenAudioStudio(0);
+
+    private void NeuralLab_Click(object sender, RoutedEventArgs e)
+    {
+        if (_playing) StopPlay();
+        var window = new NeuralLabWindow(this, _level);
+        bool applied = false;
+        window.Applied += () => applied = true;
+        window.ShowDialog();
+        if (applied)
+        {
+            Scene.SetLevel(_level, frame: false);
+            BuildHierarchy();
+            RefreshInspector();
+            Scene.Refresh();
+            MarkDirty(null, "Neural Lab controller");
+            StatusText.Text = "Neural controller applied to the level";
+        }
+    }
 
     private void TextToSpeech_Click(object sender, RoutedEventArgs e) => OpenAudioStudio(2);
 
@@ -1471,6 +1494,19 @@ public partial class MainWindow : Window
         Scene.Focus();
         StatusText.Text = $"Playing — WASD move, Space jump, Shift sprint, F10 step, Esc stop";
         Log($"Play mode started with {_play.ProgramCount} GASM program(s)");
+    }
+
+    /// <summary>Automation entry point used by --shot-project to open a saved demo and frame it.</summary>
+    public void OpenProjectForScreenshot(string path)
+    {
+        OpenFile(path);
+        var block = _level.AllNodes().FirstOrDefault(n => n.Kind == NodeKind.GASM && !n.Generated);
+        if (block != null)
+        {
+            SelectNode(block);
+            BottomTabs.SelectedIndex = 0;
+        }
+        Scene.FrameAll();
     }
 
     public void StartPlayForScreenshot()
@@ -2460,6 +2496,7 @@ public partial class MainWindow : Window
             "Rotate" => EditorTool.Rotate,
             "Scale" => EditorTool.Scale,
             "Brush" => EditorTool.Brush,
+            "Terrain" => EditorTool.Terrain,
             "Build" => EditorTool.Build,
             "Measure" => EditorTool.Measure,
             "Prefab" => EditorTool.Prefab,
@@ -2483,12 +2520,16 @@ public partial class MainWindow : Window
             BuildHeightSlider.Value = 3;
             BuildHeightValue.Text = "3";
             BuildHollowCheck.IsChecked = false;
+            BuildFoundationCombo.SelectedIndex = 0;
+            BuildFoundationDepth.Text = "4";
             BuildColorBox.Text = Scene.BuildColor.Hex;
             UpdateBuildColorSwatch();
             Scene.BuildShape = BuildShape.Box;
             Scene.BuildHeight = 3;
             Scene.BuildHollow = false;
             Scene.BuildMaterial = 8;
+            Scene.BuildFoundation = TerrainFoundationMode.None;
+            Scene.BuildFoundationDepth = 4;
             SyncBuildShapeButtons();
         }
         finally
@@ -2545,6 +2586,32 @@ public partial class MainWindow : Window
     {
         if (_syncingBuildUi || BuildMaterialCombo.SelectedIndex < 0) return;
         Scene.BuildMaterial = MaterialInfo.All[Math.Clamp(BuildMaterialCombo.SelectedIndex, 0, MaterialInfo.All.Length - 1)].Id;
+    }
+
+    private void BuildFoundation_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingBuildUi || BuildFoundationCombo.SelectedIndex < 0) return;
+        Scene.BuildFoundation = BuildFoundationCombo.SelectedIndex switch
+        {
+            1 => TerrainFoundationMode.LevelGround,
+            2 => TerrainFoundationMode.CarveFoundation,
+            _ => TerrainFoundationMode.None
+        };
+    }
+
+    private void BuildFoundationDepth_Changed(object sender, RoutedEventArgs e) => ApplyBuildFoundationDepth();
+
+    private void BuildFoundationDepth_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) { ApplyBuildFoundationDepth(); Keyboard.ClearFocus(); e.Handled = true; }
+    }
+
+    private void ApplyBuildFoundationDepth()
+    {
+        if (Scene == null) return;
+        if (float.TryParse(BuildFoundationDepth.Text, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out float depth))
+            Scene.BuildFoundationDepth = depth;
     }
 
     private void BuildColor_Changed(object sender, RoutedEventArgs e) => ApplyBuildColor();
@@ -2610,10 +2677,12 @@ public partial class MainWindow : Window
         ToolRotate.IsChecked = tool == EditorTool.Rotate;
         ToolScale.IsChecked = tool == EditorTool.Scale;
         ToolBrush.IsChecked = tool == EditorTool.Brush;
+        ToolTerrain.IsChecked = tool == EditorTool.Terrain;
         ToolBuild.IsChecked = tool == EditorTool.Build;
         ToolMeasure.IsChecked = tool == EditorTool.Measure;
         ToolPrefab.IsChecked = tool == EditorTool.Prefab;
         BrushPalette.Visibility = tool == EditorTool.Brush ? Visibility.Visible : Visibility.Collapsed;
+        if (TerrainPalette != null) TerrainPalette.Visibility = tool == EditorTool.Terrain ? Visibility.Visible : Visibility.Collapsed;
         if (BuildPalette != null)
         {
             BuildPalette.Visibility = tool == EditorTool.Build ? Visibility.Visible : Visibility.Collapsed;
@@ -2626,6 +2695,11 @@ public partial class MainWindow : Window
             if (Scene.BrushMode == BlockBrushMode.None) Scene.BrushMode = _lastBrushMode;
             _lastBrushMode = Scene.BrushMode;
             SyncBrushModeButtons(Scene.BrushMode);
+        }
+        if (tool == EditorTool.Terrain)
+        {
+            SyncTerrainButtons();
+            StatusText.Text = "Terrain shaper: choose Add, Subtract, Smooth, Flatten or Paint, then drag on the terrain";
         }
         if (tool != EditorTool.Prefab)
         {
@@ -2681,6 +2755,145 @@ public partial class MainWindow : Window
             Keyboard.ClearFocus();
             e.Handled = true;
         };
+        RefreshBrushPalette();
+    }
+
+    private void RefreshBrushPalette()
+    {
+        if (BrushRecentPanel == null || BrushFavoritesPanel == null) return;
+        FillPalettePanel(BrushRecentPanel, _blockPalette.Recent, emptyText: "Use the brush once to build a recent list");
+        FillPalettePanel(BrushFavoritesPanel, _blockPalette.Favorites, emptyText: "Press ☆ Save preset to keep a setup");
+        UpdateBrushFavoriteButton();
+    }
+
+    private void FillPalettePanel(WrapPanel panel, IReadOnlyList<BlockPaletteEntry> entries, string emptyText)
+    {
+        panel.Children.Clear();
+        if (entries.Count == 0)
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = emptyText,
+                Foreground = new SolidColorBrush(Color.FromRgb(120, 120, 120)),
+                FontSize = 10,
+                FontStyle = FontStyles.Italic,
+                Margin = new Thickness(0, 1, 0, 1)
+            });
+            return;
+        }
+        foreach (var entry in entries)
+        {
+            var chip = Theme.Button(entry.Label, small: true);
+            chip.Tag = entry;
+            chip.ToolTip = entry.Tooltip + "\nClick to load this brush setup";
+            chip.Margin = new Thickness(0, 0, 4, 4);
+            chip.Click += BrushPaletteChip_Click;
+            var border = new Border
+            {
+                BorderBrush = MaterialChipBrush(entry),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(3),
+                Margin = new Thickness(0, 0, 3, 3),
+                Child = chip
+            };
+            panel.Children.Add(border);
+        }
+    }
+
+    private static Brush MaterialChipBrush(BlockPaletteEntry entry)
+    {
+        if (MaterialInfo.IsColorable(entry.Material))
+        {
+            var color = Col.FromHex(entry.Color, new Col(0.72f, 0.72f, 0.72f, 1f));
+            return new SolidColorBrush(Color.FromRgb((byte)color.Ri, (byte)color.Gi, (byte)color.Bi));
+        }
+        return new SolidColorBrush(Color.FromRgb(90, 90, 96));
+    }
+
+    private BlockPaletteEntry CurrentBrushPaletteEntry() => new()
+    {
+        Material = Scene.BrushMaterial,
+        Color = Scene.BrushColor.Hex,
+        Shape = Scene.BrushShape,
+        CellSize = Scene.BrushCellSize,
+        Hollow = Scene.BrushHollow,
+        Layers = Scene.BrushLayers
+    };
+
+    private void UpdateBrushFavoriteButton()
+    {
+        if (BrushFavoriteButton == null) return;
+        bool favorite = BlockPalette.IsFavorite(_blockPalette, CurrentBrushPaletteEntry());
+        BrushFavoriteButton.Content = favorite ? "★ Saved" : "☆ Save preset";
+        BrushFavoriteButton.ToolTip = favorite
+            ? "Remove this brush setup from favourites"
+            : "Save the current material, colour, shape and cell setup as a favourite";
+    }
+
+    private void BrushFavorite_Click(object sender, RoutedEventArgs e)
+    {
+        bool added = BlockPalette.ToggleFavorite(_blockPalette, CurrentBrushPaletteEntry());
+        RefreshBrushPalette();
+        StatusText.Text = added ? "Brush preset saved to favourites" : "Brush preset removed from favourites";
+    }
+
+    private void BrushPaletteChip_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.Tag is not BlockPaletteEntry entry) return;
+        ApplyBrushPaletteEntry(entry);
+    }
+
+    private void ApplyBrushPaletteEntry(BlockPaletteEntry entry)
+    {
+        bool previous = _syncingBrushUi;
+        _syncingBrushUi = true;
+        try
+        {
+            int material = Math.Max(0, Array.FindIndex(MaterialInfo.All, m => m.Id == entry.Material));
+            BrushMaterialCombo.SelectedIndex = material;
+            Scene.BrushMaterial = entry.Material;
+            Scene.BrushColor = Col.FromHex(entry.Color, Scene.BrushColor);
+            BrushColorBox.Text = Scene.BrushColor.Hex;
+            int shape = Math.Max(0, Array.FindIndex(ShapeInfo.All, s => s.Id == entry.Shape));
+            BrushShapeCombo.SelectedIndex = shape;
+            Scene.BrushShape = entry.Shape;
+            Scene.BrushCellSize = entry.CellSize;
+            int cellIndex = ClosestComboIndex(BrushCellCombo, entry.CellSize);
+            if (cellIndex >= 0) BrushCellCombo.SelectedIndex = cellIndex;
+            Scene.BrushLayers = entry.Layers;
+            int layerIndex = ClosestComboIndex(BrushLayerCombo, entry.Layers);
+            if (layerIndex >= 0) BrushLayerCombo.SelectedIndex = layerIndex;
+            BrushHollowCheck.IsChecked = entry.Hollow;
+            Scene.BrushHollow = entry.Hollow;
+            bool colorable = MaterialInfo.IsColorable(entry.Material);
+            BrushColorBox.IsEnabled = colorable;
+            BrushColorSwatch.Opacity = colorable ? 1 : 0.35;
+            UpdateBrushColorSwatch();
+            SyncBrushModeButtons(Scene.BrushMode);
+        }
+        finally
+        {
+            _syncingBrushUi = previous;
+        }
+        RefreshBrushPalette();
+        SelectEditorTool(EditorTool.Brush);
+        StatusText.Text = "Brush preset: " + entry.Tooltip;
+    }
+
+    private static int ClosestComboIndex(ComboBox combo, double value)
+    {
+        int best = -1;
+        double bestDistance = double.MaxValue;
+        for (int i = 0; i < combo.Items.Count; i++)
+        {
+            if (!double.TryParse(combo.Items[i]?.ToString(), System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out double option)) continue;
+            double distance = Math.Abs(option - value);
+            if (distance >= bestDistance) continue;
+            bestDistance = distance;
+            best = i;
+        }
+        return best;
     }
 
     private void SyncBrushModeButtons(BlockBrushMode mode)
@@ -2719,6 +2932,7 @@ public partial class MainWindow : Window
     {
         if (_syncingBrushUi || BrushShapeCombo.SelectedIndex < 0) return;
         Scene.BrushShape = ShapeInfo.All[BrushShapeCombo.SelectedIndex].Id;
+        UpdateBrushFavoriteButton();
     }
 
     private void BrushMaterial_Changed(object sender, SelectionChangedEventArgs e)
@@ -2728,6 +2942,7 @@ public partial class MainWindow : Window
         bool colorable = MaterialInfo.IsColorable(Scene.BrushMaterial);
         BrushColorBox.IsEnabled = colorable;
         BrushColorSwatch.Opacity = colorable ? 1 : 0.35;
+        UpdateBrushFavoriteButton();
     }
 
     private void BrushCell_Changed(object sender, SelectionChangedEventArgs e)
@@ -2736,6 +2951,7 @@ public partial class MainWindow : Window
         if (double.TryParse(BrushCellCombo.SelectedItem.ToString(), System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out double size))
             Scene.BrushCellSize = size;
+        UpdateBrushFavoriteButton();
     }
 
     private void BrushLayers_Changed(object sender, SelectionChangedEventArgs e)
@@ -2743,15 +2959,181 @@ public partial class MainWindow : Window
         if (_syncingBrushUi || BrushLayerCombo.SelectedItem is null) return;
         if (int.TryParse(BrushLayerCombo.SelectedItem.ToString(), out int layers))
             Scene.BrushLayers = layers;
+        UpdateBrushFavoriteButton();
     }
 
     private void BrushHollow_Click(object sender, RoutedEventArgs e)
     {
         if (_syncingBrushUi) return;
         Scene.BrushHollow = BrushHollowCheck.IsChecked == true;
+        UpdateBrushFavoriteButton();
     }
 
     private void BrushClose_Click(object sender, RoutedEventArgs e) => SelectEditorTool(EditorTool.Move);
+
+    // ================= terrain shaper palette =================
+
+    private void InitializeTerrainPalette()
+    {
+        _syncingTerrainUi = true;
+        try
+        {
+            TerrainShapeCombo.SelectedIndex = 0;
+            TerrainSizeSlider.Value = 4;
+            TerrainSizeValue.Text = "4";
+            TerrainStrengthSlider.Value = 1;
+            TerrainStrengthValue.Text = "100%";
+            TerrainCellCombo.SelectedIndex = 1;
+            TerrainMaterialCombo.ItemsSource = MaterialInfo.All.Select(m => m.Name).ToList();
+            TerrainMaterialCombo.SelectedIndex = Math.Max(0, Array.FindIndex(MaterialInfo.All, m => m.Id == 8));
+            TerrainColorBox.Text = Scene.TerrainColor.Hex;
+            UpdateTerrainColorSwatch();
+            Scene.TerrainMode = TerrainSculptMode.Add;
+            Scene.TerrainVolume = TerrainBrushVolume.Sphere;
+            Scene.TerrainRadius = 4;
+            Scene.TerrainCellSize = 1.0;
+            Scene.TerrainStrength = 1f;
+            Scene.TerrainMaterial = 8;
+            SyncTerrainButtons();
+        }
+        finally
+        {
+            _syncingTerrainUi = false;
+        }
+    }
+
+    private void SyncTerrainButtons()
+    {
+        if (TerrainAdd == null) return;
+        bool previous = _syncingTerrainUi;
+        _syncingTerrainUi = true;
+        try
+        {
+            TerrainAdd.IsChecked = Scene.TerrainMode == TerrainSculptMode.Add;
+            TerrainRemove.IsChecked = Scene.TerrainMode == TerrainSculptMode.Remove;
+            TerrainSmooth.IsChecked = Scene.TerrainMode == TerrainSculptMode.Smooth;
+            TerrainFlatten.IsChecked = Scene.TerrainMode == TerrainSculptMode.Flatten;
+            TerrainPaint.IsChecked = Scene.TerrainMode == TerrainSculptMode.Paint;
+            TerrainHint.Text = Scene.TerrainMode switch
+            {
+                TerrainSculptMode.Add => "LMB fills a solid volume of terrain blocks",
+                TerrainSculptMode.Remove => "LMB erases a rounded volume from the surface",
+                TerrainSculptMode.Smooth => "LMB evens the surface using the strength setting",
+                TerrainSculptMode.Flatten => "LMB sets the surface to the clicked height",
+                _ => "LMB paints the material and colour onto terrain"
+            };
+            bool colorable = MaterialInfo.IsColorable(Scene.TerrainMaterial);
+            TerrainColorBox.IsEnabled = colorable;
+            TerrainColorSwatch.Opacity = colorable ? 1 : 0.35;
+            // Add/Erase/Paint write exact volumes; only Smooth blends with the surface.
+            bool usesStrength = Scene.TerrainMode == TerrainSculptMode.Smooth;
+            TerrainStrengthSlider.IsEnabled = usesStrength;
+            TerrainStrengthValue.Opacity = usesStrength ? 1 : 0.4;
+        }
+        finally
+        {
+            _syncingTerrainUi = previous;
+        }
+    }
+
+    private void TerrainMode_Click(object sender, RoutedEventArgs e)
+    {
+        if (_syncingTerrainUi || sender is not ToggleButton button) return;
+        if (!Enum.TryParse<TerrainSculptMode>(button.Tag?.ToString(), out var mode)) return;
+        Scene.TerrainMode = mode;
+        SelectEditorTool(EditorTool.Terrain);
+        SyncTerrainButtons();
+        Scene.Focus();
+    }
+
+    private void TerrainShape_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingTerrainUi || TerrainShapeCombo.SelectedIndex < 0) return;
+        Scene.TerrainVolume = TerrainShapeCombo.SelectedIndex switch
+        {
+            1 => TerrainBrushVolume.Box,
+            2 => TerrainBrushVolume.Cylinder,
+            _ => TerrainBrushVolume.Sphere
+        };
+    }
+
+    private void TerrainSize_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (TerrainSizeValue == null) return;
+        int size = Math.Max(1, (int)Math.Round(e.NewValue));
+        TerrainSizeValue.Text = size.ToString();
+        if (!_syncingTerrainUi) Scene.TerrainRadius = size;
+    }
+
+    private void TerrainStrength_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (TerrainStrengthValue == null) return;
+        TerrainStrengthValue.Text = $"{e.NewValue * 100:0}%";
+        if (!_syncingTerrainUi) Scene.TerrainStrength = (float)e.NewValue;
+    }
+
+    private void TerrainCell_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingTerrainUi || TerrainCellCombo.SelectedIndex < 0) return;
+        Scene.TerrainCellSize = TerrainCellCombo.SelectedIndex switch
+        {
+            0 => 0.5,
+            2 => 2.0,
+            _ => 1.0
+        };
+    }
+
+    private void TerrainMaterial_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingTerrainUi || TerrainMaterialCombo.SelectedIndex < 0) return;
+        Scene.TerrainMaterial = MaterialInfo.All[Math.Clamp(TerrainMaterialCombo.SelectedIndex, 0, MaterialInfo.All.Length - 1)].Id;
+        SyncTerrainButtons();
+    }
+
+    private void TerrainColor_Changed(object sender, RoutedEventArgs e) => ApplyTerrainColor();
+
+    private void TerrainColor_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) { ApplyTerrainColor(); Keyboard.ClearFocus(); e.Handled = true; }
+    }
+
+    private void ApplyTerrainColor()
+    {
+        var parsed = Col.FromHex(TerrainColorBox.Text, Scene.TerrainColor);
+        TerrainColorBox.Text = parsed.Hex;
+        Scene.TerrainColor = parsed;
+        UpdateTerrainColorSwatch();
+    }
+
+    private void UpdateTerrainColorSwatch()
+    {
+        var c = Scene.TerrainColor;
+        TerrainColorSwatch.Background = new SolidColorBrush(Color.FromRgb((byte)c.Ri, (byte)c.Gi, (byte)c.Bi));
+    }
+
+    private void TerrainClose_Click(object sender, RoutedEventArgs e) => SelectEditorTool(EditorTool.Move);
+
+    private void TerrainTool_Click(object sender, RoutedEventArgs e) => SelectEditorTool(EditorTool.Terrain);
+
+    private void TerrainStudioFromPalette_Click(object sender, RoutedEventArgs e) => Terrain_Click(sender, e);
+
+    private void Scene_TerrainSculpted(TerrainSculptResult result)
+    {
+        if (result.Count == 0)
+        {
+            StatusText.Text = result.Summary;
+            return;
+        }
+        if (result.Added > 0 || result.Removed > 0) BuildHierarchy();
+        else
+        {
+            HierarchyInfo.Text = $"{_level.AllNodes().Count()} objects";
+            RefreshInspector();
+        }
+        StatusText.Text = result.Summary;
+        Log(result.Summary);
+        MarkDirty(null, "Terrain " + result.Description);
+    }
 
     private void BrushSymmetry_Changed(object sender, SelectionChangedEventArgs e)
     {
@@ -2886,6 +3268,7 @@ public partial class MainWindow : Window
         BrushColorBox.Text = parsed.Hex;
         Scene.BrushColor = parsed;
         UpdateBrushColorSwatch();
+        UpdateBrushFavoriteButton();
     }
 
     private void UpdateBrushColorSwatch()
@@ -2898,6 +3281,8 @@ public partial class MainWindow : Window
     {
         if (result.Count > 0)
         {
+            BlockPalette.AddRecent(_blockPalette, CurrentBrushPaletteEntry());
+            RefreshBrushPalette();
             if (result.Created) BuildHierarchy();
             else
             {
@@ -3626,6 +4011,35 @@ __BULK__    }
             n.GeneratedFor == split.Node.EditorId && n.PageIndex > 0 && n.StartActive);
         check("shrinking a script deactivates old continuation pages", stalePages == 0 && smallResult.Continuations.Count == 0,
             $"{stalePages} stale page(s)");
+
+        // A page can hit GRAB's connection limit long before its instruction budget.
+        // The splitter must reserve a page break when the next statement would add a
+        // new scene object, not wait for the old compile error.
+        var connectionLevel = GrabLevel.CreateDefault();
+        var names = new[] { "O00A", "O01A", "O02A", "O03A", "O04A", "O05A", "O06A", "O07A", "O08A", "O09A", "O10A", "O11A" };
+        foreach (var name in names)
+            connectionLevel.AddNode(new LevelNode
+            {
+                Kind = NodeKind.Static, Name = name, Position = new Vec3(0, 1, 0),
+                Scale = Vec3.One, Shape = ShapeInfo.Cube, Material = 8
+            });
+        var connectionNode = new LevelNode { Kind = NodeKind.GASM, Name = "ConnectionSplit", Position = new Vec3(0, 2, 0) };
+        connectionLevel.AddNode(connectionNode);
+        connectionLevel.EnsureNames();
+        string connectionScript = "using Grab;\npublic class ConnectionSplit : CodeBlock\n{\n" +
+            string.Join("\n", names.Select((name, i) => $"    GameObject o{i} = GameObject.Find(\"{name}\");")) +
+            "\n    void Update()\n    {\n" +
+            string.Join("\n", Enumerable.Range(0, names.Length).Select(i => $"        o{i}.Position.Y = Time.DeltaTime;")) +
+            "\n    }\n}\n";
+        connectionNode.Script = connectionScript;
+        var connectionResult = new CSharpCompiler().Compile(connectionLevel, connectionNode, connectionScript);
+        connectionNode.Compiled = connectionResult;
+        var connectionPages = new List<GasmCompileResult> { connectionResult };
+        connectionPages.AddRange(connectionResult.Continuations);
+        check("connection-aware split keeps large scripts inside GRAB's connection limit",
+            connectionResult.Success && connectionPages.Count > 1 &&
+            connectionPages.All(p => p.Connections.Count <= GrabLimits.MaxConnections),
+            $"{connectionPages.Count} page(s), max {connectionPages.Max(p => p.Connections.Count)} connections");
     }
 
     /// <summary>End-to-end verification used by `GRABEngine.exe --selftest`.</summary>
@@ -4002,6 +4416,128 @@ public class LanguageTest : CodeBlock
             var paintedRoad = TerrainBuilder.Build(new GrabLevel(), roadSettings, null, null, paintedPath);
             Check("painted terrain paths carve without coordinates", paintedRoad.PathBlocks == 8,
                 $"{paintedRoad.PathBlocks} painted path cell(s)");
+
+            // ---- 3D terrain shaper and foundation ----
+            var sculptLevel = new GrabLevel();
+            var sculptGroup = new LevelNode { Kind = NodeKind.Group, Name = "Terrain", EditorLabel = "terrain" };
+            sculptLevel.AddNode(sculptGroup);
+            for (int x = -2; x <= 2; x++)
+                for (int z = -2; z <= 2; z++)
+                {
+                    var column = new LevelNode
+                    {
+                        Kind = NodeKind.Static, Name = "Terrain " + x + "," + z,
+                        Shape = ShapeInfo.Cube, Material = 8, Color1 = new Col(0.33f, 0.55f, 0.28f, 1f),
+                        Position = new Vec3(x, 2, z), Scale = new Vec3(1, 4, 1)
+                    };
+                    sculptGroup.Children.Add(column);
+                    column.RebuildParents(sculptGroup);
+                }
+            sculptLevel.EnsureNames();
+            int sculptBefore = sculptLevel.AllNodes().Count(n => n.EditorLabel == "terrain");
+            var terrainAdd = TerrainSculptor.Apply(sculptLevel, new Vec3(0, 5, 0), new TerrainSculptSettings
+            {
+                Mode = TerrainSculptMode.Add, Volume = TerrainBrushVolume.Sphere, Radius = 2,
+                Material = 8, Color = new Col(0.33f, 0.55f, 0.28f, 1f)
+            });
+            int sculptAfterAdd = sculptLevel.AllNodes().Count(n => n.EditorLabel == "terrain");
+            Check("terrain shaper adds a solid 3D brush volume", terrainAdd.Added > 0 && sculptAfterAdd >= sculptBefore,
+                $"{terrainAdd.Added} cells, {sculptAfterAdd} blocks");
+            var terrainRemove = TerrainSculptor.Apply(sculptLevel, new Vec3(0, 6, 0), new TerrainSculptSettings
+            {
+                Mode = TerrainSculptMode.Remove, Volume = TerrainBrushVolume.Sphere, Radius = 2
+            });
+            Check("terrain shaper subtracts a rounded volume", terrainRemove.Removed > 0,
+                $"{terrainRemove.Removed} cells, {terrainRemove.Columns} columns");
+            var terrainPaint = TerrainSculptor.Apply(sculptLevel, new Vec3(0, 3, 0), new TerrainSculptSettings
+            {
+                Mode = TerrainSculptMode.Paint, Volume = TerrainBrushVolume.Box, Radius = 1,
+                Material = 10, Color = new Col(0.9f, 0.9f, 0.95f, 1f)
+            });
+            Check("terrain shaper paints a material volume", terrainPaint.Changed > 0,
+                $"{terrainPaint.Changed} cells");
+            var fineTerrain = new GrabLevel();
+            var fineAdd = TerrainSculptor.Apply(fineTerrain, new Vec3(0, 1, 0), new TerrainSculptSettings
+            {
+                Mode = TerrainSculptMode.Add, Volume = TerrainBrushVolume.Sphere, Radius = 2,
+                Material = 8, Color = new Col(0.33f, 0.55f, 0.28f, 1f), CellSize = 0.5
+            });
+            Check("terrain shaper honours sub-metre grid sizes", fineAdd.Added > 0 &&
+                fineTerrain.AllNodes().Where(n => n.Kind == NodeKind.Static)
+                    .Any(n => Math.Abs(Math.Abs(n.Scale.X) - 0.5) < 0.01),
+                $"{fineAdd.Added} cells at 0.5 m");
+
+            var foundationLevel = new GrabLevel();
+            var foundationGroup = new LevelNode { Kind = NodeKind.Group, Name = "Terrain", EditorLabel = "terrain" };
+            foundationLevel.AddNode(foundationGroup);
+            var foundationColumn = new LevelNode
+            {
+                Kind = NodeKind.Static, Shape = ShapeInfo.Cube, Material = 8,
+                Position = new Vec3(0, 2, 0), Scale = new Vec3(1, 4, 1)
+            };
+            foundationGroup.Children.Add(foundationColumn);
+            foundationColumn.RebuildParents(foundationGroup);
+            foundationLevel.EnsureNames();
+            var foundationBuilding = new LevelNode
+            {
+                Kind = NodeKind.Static, Shape = ShapeInfo.Cube, Material = 8,
+                Position = new Vec3(0, 6, 0), Scale = new Vec3(2, 2, 2)
+            };
+            var foundationResult = TerrainSculptor.PrepareFoundation(foundationLevel,
+                new[] { foundationBuilding }, TerrainFoundationMode.LevelGround, 2);
+            var foundationTop = foundationLevel.AllNodes()
+                .Where(n => n.EditorLabel == "terrain" && n.Kind == NodeKind.Static)
+                .Select(n => n.WorldPosition.Y + Math.Abs(n.WorldScale.Y) * 0.5f)
+                .DefaultIfEmpty(0).Max();
+            Check("terrain-aware foundation levels ground under a structure",
+                foundationResult.Columns > 0 && Math.Abs(foundationTop - 5f) < 0.01f,
+                $"top {foundationTop:0.##}, {foundationResult.Summary}");
+
+            // ---- mixed-size and duplicate optimisation ----
+            var optLevel = new GrabLevel();
+            LevelNode OptBlock(double x, double y, double z, double sx, double sy, double sz)
+            {
+                var node = new LevelNode
+                {
+                    Kind = NodeKind.Static, Shape = ShapeInfo.Cube, Material = 8,
+                    Position = new Vec3((float)x, (float)y, (float)z),
+                    Scale = new Vec3((float)sx, (float)sy, (float)sz)
+                };
+                optLevel.AddNode(node);
+                return node;
+            }
+            OptBlock(0.5, 0.5, 0.5, 1, 1, 1);
+            OptBlock(0.5, 2, 0.5, 1, 2, 1);
+            OptBlock(0.5, 2, 0.5, 1, 2, 1);
+            optLevel.EnsureNames();
+            int optBefore = optLevel.AllNodes().Count(n => n.Kind == NodeKind.Static);
+            var optResult = LevelOptimizer.Optimize(optLevel, new LevelOptimizeOptions
+            {
+                MergeAdjacentCubes = false, MergeMixedSizes = true, MixedSizeGrid = 1,
+                CullHiddenBlocks = false, RemoveDuplicateBlocks = true, RemoveEmptyGroups = false
+            });
+            int optAfter = optLevel.AllNodes().Count(n => n.Kind == NodeKind.Static);
+            Check("optimizer removes exact duplicates before merging",
+                optResult.DuplicateBlocks == 1 && optAfter < optBefore,
+                $"duplicates {optResult.DuplicateBlocks}, {optBefore} → {optAfter}");
+            Check("optimizer merges different block heights on the grid",
+                optResult.MergedBlocks > 0 && optAfter == 1,
+                $"merged {optResult.MergedBlocks}, {optAfter} block(s) left");
+            var degenerateLevel = new GrabLevel();
+            degenerateLevel.AddNode(new LevelNode
+            {
+                Kind = NodeKind.Static, Shape = ShapeInfo.Cube, Material = 8,
+                Position = Vec3.Zero, Scale = new Vec3(0, 1, 1)
+            });
+            var degenerateResult = LevelOptimizer.Optimize(degenerateLevel, new LevelOptimizeOptions
+            {
+                MergeAdjacentCubes = false, MergeMixedSizes = false, CullHiddenBlocks = false,
+                RemoveDuplicateBlocks = false, RemoveDegenerateBlocks = true, RemoveEmptyGroups = false
+            });
+            Check("optimizer removes invisible zero-size blocks",
+                degenerateResult.DegenerateBlocks == 1 &&
+                degenerateLevel.AllNodes().Count(n => n.Kind == NodeKind.Static) == 0,
+                $"{degenerateResult.DegenerateBlocks} removed");
 
             // The Draw tool plans and commits real blocks through the same path as the UI.
             var drawLevel = new GrabLevel();
@@ -4495,6 +5031,32 @@ public class LifeTest : CodeBlock
             for (int i = 0; i < 5; i++) lifePlay.Step(1f / 60f);
             Check("OnTriggerStay drives the scene while a trigger is active", lifeBox.Position.Y > 0.5f,
                 $"Y={lifeBox.Position.Y:0.###}");
+
+            // A page full of object connections must leave room for the trigger dispatcher.
+            // Without the reservation, the last body page would silently drop the event.
+            var hookSplitLevel = new GrabLevel { Title = "Trigger split" };
+            for (int i = 1; i <= 9; i++)
+                hookSplitLevel.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "O" + i, Position = new Vec3(i, 1, 0) });
+            var hookSplitCode = new LevelNode { Kind = NodeKind.GASM, Name = "Hook", Position = new Vec3(0, 2, 0) };
+            var hookSplitTrigger = new LevelNode { Kind = NodeKind.Trigger, Name = "Area", Position = new Vec3(0, 0, 0) };
+            hookSplitTrigger.TriggerTargets.Add(new TriggerTarget { Kind = 7, Mode = 0, ObjectName = "Hook", TargetMode = 1 });
+            hookSplitLevel.AddNode(hookSplitCode);
+            hookSplitLevel.AddNode(hookSplitTrigger);
+            hookSplitLevel.EnsureNames();
+            var hookSplitScript = "using Grab;\npublic class HookSplit : CodeBlock\n{\n" +
+                string.Concat(Enumerable.Range(1, 9).Select(i => $"    GameObject o{i} = GameObject.Find(\"O{i}\");\n")) +
+                "    void Update()\n    {\n" +
+                string.Concat(Enumerable.Repeat("        o1.Position.Y = o2.Position.Y + o3.Position.Y + o4.Position.Y + o5.Position.Y + o6.Position.Y + o7.Position.Y + o8.Position.Y + o9.Position.Y;\n", 30)) +
+                "    }\n    void OnTriggerStay() { }\n}\n";
+            hookSplitCode.Script = hookSplitScript;
+            var hookSplitResult = new CSharpCompiler().Compile(hookSplitLevel, hookSplitCode, hookSplitScript);
+            hookSplitCode.Compiled = hookSplitResult;
+            var hookTriggerId = hookSplitLevel.BuildObjectIds().TryGetValue(hookSplitTrigger, out var ht) ? ht : 0;
+            var allHookPages = hookSplitResult.Continuations.Prepend(hookSplitResult).ToList();
+            Check("split pages reserve a trigger dispatcher connection",
+                hookSplitResult.Success && hookSplitResult.Continuations.Count > 0 &&
+                allHookPages.Any(page => page.Connections.Any(c => c.ObjectId == hookTriggerId)),
+                $"{hookSplitResult.Continuations.Count} continuation(s), {allHookPages.Sum(p => p.Connections.Count)} connection(s)");
 
             // ---- params arrays are packed into registers at the call site ----
             var paramsLevel = new GrabLevel { Title = "Params Test" };
@@ -5111,6 +5673,331 @@ public class ParamsTest : CodeBlock
             string toolErrors = toolPanel.RunToolSelfTest();
             Check("animation frame tools (stop-motion, in-between, duplicate, lerp, bake)",
                 string.IsNullOrEmpty(toolErrors), toolErrors);
+
+            // ---- neural network demo ----
+            var neuralOptions = new NeuralTrainingOptions
+            {
+                Hidden = 4,
+                Population = 96,
+                Generations = 80,
+                Patience = 18,
+                MaxSteps = 480,
+                Seed = 20261029
+            };
+            var neuralReport = new NeuralTrainer(neuralOptions).Train();
+            Check("neural trainer learns across generations",
+                neuralReport.History.Count >= 2 &&
+                neuralReport.History[^1].BestDistance < neuralReport.History[0].BestDistance,
+                FormattableString.Invariant($"{neuralReport.History.FirstOrDefault()?.BestDistance:0.000} -> {neuralReport.BestDistance:0.000}"));
+            Check("neural trainer solves the arena and stops",
+                neuralReport.Solved && neuralReport.StopReason.StartsWith("Solved", StringComparison.Ordinal),
+                neuralReport.StopReason);
+            Check("neural demo run reaches the target",
+                neuralReport.DemoRun?.Reached == true,
+                neuralReport.DemoRun?.Describe() ?? "no demo run");
+
+            var neuralLevel = NeuralDemoBuilder.BuildLevel(neuralReport);
+            var neuralBlock = neuralLevel.AllNodes().First(n => n.Kind == NodeKind.GASM && !n.Generated);
+            var neuralCompile = neuralBlock.Compiled;
+            var neuralPages = neuralCompile == null
+                ? new List<GasmCompileResult>()
+                : new[] { neuralCompile }.Concat(neuralCompile.Continuations).ToList();
+            Check("neural C# compiles to valid GASM",
+                neuralCompile?.Success == true && neuralPages.Count > 0,
+                neuralCompile == null ? "no compile" : $"{neuralPages.Count} page(s)");
+            Check("neural GASM respects every Code Block limit",
+                neuralPages.All(p => p.Program.Instructions.Count <= GrabLimits.MaxInstructions &&
+                                     p.Connections.Count <= GrabLimits.MaxConnections),
+                string.Join(", ", neuralPages.Select(p => p.Program.Instructions.Count)));
+
+            var neuralLoaded = ProjectIO.Deserialize(ProjectIO.Serialize(neuralLevel));
+            var loadedNeuralBlock = neuralLoaded.AllNodes().First(n => n.Kind == NodeKind.GASM && !n.Generated);
+            var loadedNeuralCompile = new CSharpCompiler().Compile(neuralLoaded, loadedNeuralBlock, loadedNeuralBlock.Script);
+            loadedNeuralBlock.Compiled = loadedNeuralCompile;
+            var neuralPlay = new PlaySession(neuralLoaded);
+            for (int i = 0; i < 600; i++) neuralPlay.Step(1f / 60f);
+            var neuralBall = neuralLoaded.FindByName(NeuralDemoBuilder.BallName);
+            var neuralTarget = neuralLoaded.FindByName(NeuralDemoBuilder.TargetName);
+            float neuralDistance = 999f;
+            if (neuralBall != null && neuralTarget != null)
+            {
+                float ndx = neuralBall.WorldPosition.X - neuralTarget.WorldPosition.X;
+                float ndz = neuralBall.WorldPosition.Z - neuralTarget.WorldPosition.Z;
+                neuralDistance = MathF.Sqrt(ndx * ndx + ndz * ndz);
+            }
+            Check("neural project reload drives the ball to the target",
+                neuralDistance <= NeuralArena.SuccessRadius,
+                neuralDistance.ToString("0.000"));
+
+            string neuralLevelPath = Path.Combine(Path.GetTempPath(), "grabengine_neural_selftest.level");
+            File.WriteAllBytes(neuralLevelPath, LevelIO.Write(neuralLevel));
+            var neuralExported = LevelIO.Load(neuralLevelPath);
+            int parkedBuses = neuralExported.AllNodes().Count(n =>
+                n.Kind == NodeKind.Static && n.Position.Y < -500f && n.Scale.X <= 0.1f);
+            int hiddenBuses = neuralExported.AllNodes().Count(n =>
+                n.Kind == NodeKind.Static && n.Position.Y < -500f && n.Scale.X <= 0.1f &&
+                n.Generated && n.HideModel);
+            Check("imported .level hides parked GASM buses",
+                parkedBuses > 0 && hiddenBuses == parkedBuses,
+                $"{hiddenBuses}/{parkedBuses} marked");
+            var neuralExportedPlay = new PlaySession(neuralExported);
+            for (int i = 0; i < 600; i++) neuralExportedPlay.Step(1f / 60f);
+            var exportedBall = neuralExported.AllNodes().FirstOrDefault(n => n.Kind == NodeKind.Static && n.Shape == ShapeInfo.Sphere);
+            var exportedTarget = neuralExported.AllNodes().FirstOrDefault(n => n.Kind == NodeKind.Static &&
+                Math.Abs(n.WorldPosition.X - NeuralArena.TargetX) < 0.01f &&
+                Math.Abs(n.WorldPosition.Z - NeuralArena.TargetZ) < 0.01f);
+            float exportedDistance = 999f;
+            if (exportedBall != null && exportedTarget != null)
+            {
+                float edx = exportedBall.WorldPosition.X - exportedTarget.WorldPosition.X;
+                float edz = exportedBall.WorldPosition.Z - exportedTarget.WorldPosition.Z;
+                exportedDistance = MathF.Sqrt(edx * edx + edz * edz);
+            }
+            Check("exported neural .level runs the same GASM and reaches the target",
+                exportedDistance <= NeuralArena.SuccessRadius,
+                exportedDistance.ToString("0.000"));
+
+            var earlyOptions = new NeuralTrainingOptions
+            {
+                Hidden = 0, Population = 8, Generations = 40, Patience = 1, Seed = 7,
+                StopWhenSolved = false, MutationRate = 0f, MutationScale = 0f
+            };
+            var earlyReport = new NeuralTrainer(earlyOptions).Train();
+            Check("neural trainer early-stops a stalled run",
+                earlyReport.GenerationsRun < earlyOptions.Generations &&
+                earlyReport.StopReason.Contains("Early stop", StringComparison.Ordinal),
+                $"{earlyReport.GenerationsRun} generations: {earlyReport.StopReason}");
+
+            // ---- Neural Lab: configurable graph, property bindings and export ----
+            var labLevel = GrabLevel.CreateDefault();
+            labLevel.Title = "Neural Lab Self Test";
+            var labBall = new LevelNode
+            {
+                Name = "Brain Ball", Kind = NodeKind.Static, Shape = ShapeInfo.Sphere, Material = 8,
+                Position = new Vec3(-4f, 0.6f, -4f), Color1 = new Col(0.1f, 0.8f, 1f), IsNeon = true
+            };
+            var labGoal = new LevelNode
+            {
+                Name = "Brain Goal", Kind = NodeKind.Static, Shape = ShapeInfo.Cube, Material = 8,
+                Position = new Vec3(4f, 0.6f, 4f), Color1 = new Col(0.2f, 1f, 0.4f), IsNeon = true
+            };
+            labLevel.AddNode(labBall);
+            labLevel.AddNode(labGoal);
+            labLevel.EnsureNames();
+            var labConfig = NeuralLabConfig.CreateStarter(labLevel, labBall.EditorId, labGoal.EditorId);
+            labConfig.HiddenLayers = new List<NeuralLayer> { new() { Neurons = 6, Activation = NeuralActivation.ReLU } };
+            labConfig.Training.Population = 40;
+            labConfig.Training.Generations = 35;
+            labConfig.Training.Patience = 12;
+            labConfig.Training.EpisodeSteps = 300;
+            labConfig.Training.Starts = 3;
+            labConfig.Training.Seed = 12345;
+            var labTrainer = new NeuralLabTrainer(labConfig, labLevel);
+            var labReport = labTrainer.Train();
+            Check("neural lab configurable trainer improves fitness",
+                labReport.History.Count >= 2 &&
+                labReport.History[^1].BestDistance <= labReport.History[0].BestDistance,
+                FormattableString.Invariant($"{labReport.History.FirstOrDefault()?.BestDistance:0.000} -> {labReport.BestDistance:0.000}"));
+
+            var movingConfig = labConfig.Clone();
+            movingConfig.Training.TargetMotion = NeuralTargetMotion.Orbit;
+            movingConfig.Training.TargetSpeed = 120f;
+            movingConfig.Training.TargetRadius = 2.5f;
+            movingConfig.Training.Population = 16;
+            movingConfig.Training.Generations = 2;
+            movingConfig.Training.Starts = 1;
+            movingConfig.Training.EpisodeSteps = 90;
+            movingConfig.EnsureWeights();
+            var movingReport = new NeuralLabTrainer(movingConfig, labLevel).Train();
+            float movedGoal = movingReport.DemoRun == null
+                ? 0f
+                : (movingReport.DemoRun.GoalStart - movingReport.DemoRun.GoalEnd).Length;
+            Check("neural lab moving-target training samples the live goal",
+                movingReport.History.Count == 2 && movingReport.DemoRun != null && movedGoal > 0.1f,
+                $"generations {movingReport.History.Count}, target {movingConfig.Training.TargetMotion}, moved {movedGoal:0.000}");
+
+            // Animate a clone so the PlaySession export checks below still see the
+            // original static goal at (4, 4).
+            var animatedLevel = ProjectIO.Clone(labLevel);
+            var animatedGoal = animatedLevel.AllNodes().First(n => n.EditorId == labGoal.EditorId);
+            animatedGoal.Animations.Add(new GrabAnimation
+            {
+                Name = "Patrol",
+                Speed = 1f,
+                Frames =
+                {
+                    new GrabAnimationFrame { Time = 0f, Position = animatedGoal.Position, Rotation = Quat.Identity },
+                    new GrabAnimationFrame { Time = 1f, Position = animatedGoal.Position + new Vec3(2f, 0f, -2f), Rotation = Quat.Identity }
+                }
+            });
+            var animatedConfig = labConfig.Clone();
+            animatedConfig.Training.TargetMotion = NeuralTargetMotion.Animated;
+            animatedConfig.Training.Population = 12;
+            animatedConfig.Training.Generations = 1;
+            animatedConfig.Training.Starts = 1;
+            animatedConfig.Training.EpisodeSteps = 60;
+            var animatedReport = new NeuralLabTrainer(animatedConfig, animatedLevel).Train();
+            float animatedGoalMoved = animatedReport.DemoRun == null
+                ? 0f
+                : (animatedReport.DemoRun.GoalStart - animatedReport.DemoRun.GoalEnd).Length;
+            Check("neural lab animated-target training follows the clip",
+                animatedReport.DemoRun != null && animatedGoalMoved > 0.1f,
+                $"target {animatedConfig.Training.TargetMotion}, moved {animatedGoalMoved:0.000}");
+
+            // A known linear controller verifies the generated GASM independently of
+            // genetic training. Inputs are target-minus-ball * 0.1 and outputs add
+            // position, so an identity matrix is a valid steer-to-target policy.
+            labConfig.Training.Mode = NeuralTrainingMode.Editor;
+            labConfig.HiddenLayers.Clear();
+            labConfig.Weights = new float[3 * 3 + 3];
+            for (int o = 0; o < 3; o++)
+            {
+                for (int i = 0; i < 3; i++)
+                    labConfig.Weights[NeuralLayout.WeightIndex(labConfig.LayerSizes, 0, o, i)] = o == i ? 1f : 0f;
+                labConfig.Weights[NeuralLayout.BiasIndex(labConfig.LayerSizes, 0, o)] = 0f;
+            }
+            var labApply = NeuralCodeBuilder.Apply(labLevel, labConfig);
+            var labPages = labApply.Compile == null
+                ? new List<GasmCompileResult>()
+                : new[] { labApply.Compile }.Concat(labApply.Compile.Continuations).ToList();
+            Check("neural lab generated C# compiles to GASM",
+                labApply.Success && labPages.Count > 0,
+                labApply.Success ? labApply.Summary : labApply.Error);
+            Check("neural lab GASM respects Code Block limits",
+                labPages.All(p => p.Program.Instructions.Count <= GrabLimits.MaxInstructions &&
+                                  p.Connections.Count <= GrabLimits.MaxConnections),
+                string.Join(", ", labPages.Select(p => p.Program.Instructions.Count)));
+
+            var signLevel = ProjectIO.Clone(labLevel);
+            var sign = new LevelNode
+            {
+                Name = "Chat Sign", Kind = NodeKind.Sign, Shape = ShapeInfo.Cube,
+                Position = new Vec3(0f, 2f, 0f), Text = ""
+            };
+            signLevel.AddNode(sign);
+            signLevel.EnsureNames();
+            var signConfig = NeuralLabConfig.CreateStarter(signLevel, labBall.EditorId, labGoal.EditorId);
+            signConfig.Training.Mode = NeuralTrainingMode.Editor;
+            signConfig.HiddenLayers.Clear();
+            signConfig.Outputs.Clear();
+            signConfig.Outputs.Add(new NeuralBinding
+            {
+                Source = NeuralSourceKind.Object,
+                ObjectId = sign.EditorId,
+                Property = NeuralProperty.SignWrite,
+                Min = 0f,
+                Max = 255f,
+                Clamp = true
+            });
+            signConfig.EnsureWeights();
+            var signApply = NeuralCodeBuilder.Apply(signLevel, signConfig);
+            var signPages = signApply.Compile == null
+                ? new List<GasmCompileResult>()
+                : new[] { signApply.Compile }.Concat(signApply.Compile.Continuations).ToList();
+            Check("neural lab sign ASCII output compiles",
+                signApply.Success && signPages.Count > 0 &&
+                signPages.All(p => p.Program.Instructions.Count <= GrabLimits.MaxInstructions &&
+                                   p.Connections.Count <= GrabLimits.MaxConnections),
+                signApply.Success ? signApply.Summary : signApply.Error);
+            var labPlay = new PlaySession(labLevel);
+            for (int i = 0; i < 700; i++) labPlay.Step(1f / 60f);
+            var playedBall = labLevel.FindByName("Brain Ball");
+            var playedGoal = labLevel.FindByName("Brain Goal");
+            float labDistance = playedBall != null && playedGoal != null
+                ? (playedBall.Position - playedGoal.Position).Length : 999f;
+            Check("neural lab property bindings drive the scene",
+                labDistance < 1.0f,
+                $"{labDistance:0.000} ball {playedBall?.Position} goal {playedGoal?.Position}");
+            var labRoundTrip = ProjectIO.Deserialize(ProjectIO.Serialize(labLevel));
+            Check("neural lab graph survives project reload",
+                labRoundTrip.NeuralLab != null &&
+                labRoundTrip.NeuralLab.Inputs.Count == 3 &&
+                labRoundTrip.NeuralLab.Outputs.Count == 3 &&
+                labRoundTrip.NeuralLab.Weights.Length == labConfig.WeightCount,
+                labRoundTrip.NeuralLab == null ? "no config" : $"{labRoundTrip.NeuralLab.Inputs.Count}/{labRoundTrip.NeuralLab.Outputs.Count}");
+
+            var runtimeConfig = labConfig.Clone();
+            runtimeConfig.Training.Mode = NeuralTrainingMode.Both;
+            runtimeConfig.Training.RuntimeTuneLimit = 12;
+            var runtimeLevel = ProjectIO.Clone(labLevel);
+            var runtimeApply = NeuralCodeBuilder.Apply(runtimeLevel, runtimeConfig);
+            var runtimePages = runtimeApply.Compile == null
+                ? new List<GasmCompileResult>()
+                : new[] { runtimeApply.Compile }.Concat(runtimeApply.Compile.Continuations).ToList();
+            var runtimeTrainerPages = runtimeApply.TrainerCompile == null
+                ? new List<GasmCompileResult>()
+                : new[] { runtimeApply.TrainerCompile }.Concat(runtimeApply.TrainerCompile.Continuations).ToList();
+            Check("neural lab runtime tuner compiles",
+                runtimeApply.Success && runtimeApply.TrainerCompile?.Success == true &&
+                runtimeApply.Block != null && runtimeApply.TrainerBlock != null,
+                runtimeApply.Success ? runtimeApply.Summary : runtimeApply.Error);
+            Check("neural lab runtime tuner respects Code Block limits",
+                runtimePages.Concat(runtimeTrainerPages).All(p =>
+                    p.Program.Instructions.Count <= GrabLimits.MaxInstructions &&
+                    p.Connections.Count <= GrabLimits.MaxConnections),
+                $"controller {runtimeApply.Instructions} / trainer {runtimeApply.TrainerInstructions} instructions, " +
+                $"{runtimeApply.WeightBuses} weight bus(es)");
+            var runtimePlay = new PlaySession(runtimeLevel);
+            for (int i = 0; i < 1500; i++) runtimePlay.Step(1f / 60f);
+            var runtimeBall = runtimeLevel.FindByName("Brain Ball");
+            var runtimeGoal = runtimeLevel.FindByName("Brain Goal");
+            float runtimeDistance = runtimeBall != null && runtimeGoal != null
+                ? (runtimeBall.Position - runtimeGoal.Position).Length : 999f;
+            Check("neural lab in-game trainer actually runs and keeps the controller useful",
+                runtimeDistance < 3.0f && runtimeApply.TrainerCompile?.Success == true,
+                $"distance {runtimeDistance:0.000}, trainer pages {runtimeTrainerPages.Count}");
+            Check("neural lab runtime buses are hidden and persistent",
+                runtimeApply.WeightBuses > 0 &&
+                runtimeLevel.AllNodes().Count(n => n.GeneratedFor == NeuralRuntimeLayout.BusMarkerPrefix + runtimeConfig.RuntimeBusPrefix) == runtimeApply.WeightBuses,
+                $"{runtimeApply.WeightBuses} bus(es)");
+            var runtimeRoundTrip = ProjectIO.Deserialize(ProjectIO.Serialize(runtimeLevel));
+            Check("neural lab runtime settings and trainer block survive project reload",
+                runtimeRoundTrip.NeuralLab != null &&
+                runtimeRoundTrip.NeuralLab.TrainerBlockId.Length > 0 &&
+                runtimeRoundTrip.NeuralLab.RuntimeBusPrefix == runtimeConfig.RuntimeBusPrefix &&
+                runtimeRoundTrip.AllNodes().Any(n => n.Script.Contains(NeuralTrainerBlock.Marker, StringComparison.Ordinal)),
+                runtimeRoundTrip.NeuralLab == null
+                    ? "no config"
+                    : $"prefix={runtimeRoundTrip.NeuralLab.RuntimeBusPrefix}, trainer='{runtimeRoundTrip.NeuralLab.TrainerBlockId}'");
+            var previewRuntimeConfig = labConfig.Clone();
+            previewRuntimeConfig.Training.Mode = NeuralTrainingMode.Runtime;
+            string previewRuntimeSource = NeuralCodeBuilder.BuildSource(labLevel, previewRuntimeConfig);
+            Check("neural lab runtime C# preview works before Apply creates the buses",
+                previewRuntimeSource.Contains("nnw0", StringComparison.Ordinal) &&
+                previewRuntimeSource.Contains("__NN_", StringComparison.Ordinal),
+                previewRuntimeSource.Length + " chars");
+            var maxRuntimeConfig = NeuralLabConfig.CreateStarter(labLevel, labBall.EditorId, labGoal.EditorId);
+            maxRuntimeConfig.Training.Mode = NeuralTrainingMode.Runtime;
+            maxRuntimeConfig.Training.RuntimeTuneLimit = NeuralRuntimeLayout.MaxTunedWeights;
+            var maxRuntimeApply = NeuralCodeBuilder.Apply(ProjectIO.Clone(labLevel), maxRuntimeConfig);
+            Check("neural lab runtime supports the maximum tuned-weight budget",
+                maxRuntimeApply.Success && maxRuntimeApply.WeightBuses == 2,
+                maxRuntimeApply.Success ? maxRuntimeApply.Summary : maxRuntimeApply.Error);
+            string runtimeLevelPath = Path.Combine(Path.GetTempPath(), "grabengine_neural_runtime.level");
+            File.WriteAllBytes(runtimeLevelPath, LevelIO.Write(runtimeLevel));
+            var runtimeExported = LevelIO.Load(runtimeLevelPath);
+            var runtimeExportedPlay = new PlaySession(runtimeExported);
+            for (int i = 0; i < 1200; i++) runtimeExportedPlay.Step(1f / 60f);
+            var exportedRuntimeBall = runtimeExported.AllNodes().FirstOrDefault(n =>
+                n.Kind == NodeKind.Static && n.Shape == ShapeInfo.Sphere && n.IsNeon);
+            var exportedRuntimeGoal = runtimeExported.AllNodes().FirstOrDefault(n =>
+                n.Kind == NodeKind.Static && n.Shape == ShapeInfo.Cube && n.IsNeon &&
+                Math.Abs(n.WorldPosition.X - 4f) < 0.05f && Math.Abs(n.WorldPosition.Z - 4f) < 0.05f);
+            float exportedRuntimeDistance = exportedRuntimeBall != null && exportedRuntimeGoal != null
+                ? (exportedRuntimeBall.WorldPosition - exportedRuntimeGoal.WorldPosition).Length : 999f;
+            int exportedRuntimeBlocks = runtimeExported.AllNodes().Count(n => n.Kind == NodeKind.GASM);
+            Check("neural lab runtime controller and trainer survive a real .level export",
+                exportedRuntimeBlocks >= 2 && exportedRuntimeDistance < 3.0f,
+                $"distance {exportedRuntimeDistance:0.000}, code blocks {exportedRuntimeBlocks}");
+            int exportedRuntimeBuses = runtimeExported.AllNodes().Count(n =>
+                n.Kind == NodeKind.Static && n.HideModel && n.Position.Y < -500f);
+            Check("neural lab weight buses are hidden after a real .level import",
+                exportedRuntimeBuses >= runtimeApply.WeightBuses,
+                $"{exportedRuntimeBuses} hidden parked bus(es)");
+            Check("neural weight layout keeps each bias with its output row",
+                NeuralLayout.WeightIndex(new[] { 3, 2, 3 }, 1, 1, 1) ==
+                NeuralLayout.BiasIndex(new[] { 3, 2, 3 }, 1, 1) - 1,
+                NeuralLayout.WeightIndex(new[] { 3, 2, 3 }, 1, 1, 1).ToString());
         }
         catch (Exception ex)
         {
@@ -5216,6 +6103,7 @@ public class ParamsTest : CodeBlock
             case Key.E: if (!typing && !flying && !inAnimationPanel) SetToolFromKey(EditorTool.Rotate); break;
             case Key.R: if (!typing && !flying && !inAnimationPanel) SetToolFromKey(EditorTool.Scale); break;
             case Key.B: if (!typing && !flying && !inAnimationPanel) SetToolFromKey(EditorTool.Brush); break;
+            case Key.T: if (!typing && !flying && !inAnimationPanel) SetToolFromKey(EditorTool.Terrain); break;
             case Key.G: if (!typing && !flying && !inAnimationPanel) SetToolFromKey(EditorTool.Build); break;
             case Key.M: if (!typing && !flying && !inAnimationPanel) SetToolFromKey(EditorTool.Measure); break;
             case Key.P: if (!typing && !flying && !inAnimationPanel) SetToolFromKey(EditorTool.Prefab); break;

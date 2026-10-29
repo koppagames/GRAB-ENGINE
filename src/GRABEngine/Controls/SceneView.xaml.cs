@@ -13,7 +13,7 @@ using GrabEngine.Rendering;
 
 namespace GrabEngine.Controls;
 
-public enum EditorTool { Select, Move, Rotate, Scale, Brush, Measure, Prefab, Build }
+public enum EditorTool { Select, Move, Rotate, Scale, Brush, Terrain, Measure, Prefab, Build }
 
 /// <summary>Shapes the in-scene Draw tool turns into real blocks.</summary>
 public enum BuildShape { Box, Sphere, Cylinder, Cone, Stairs, Ramp, Polygon }
@@ -98,6 +98,23 @@ public partial class SceneView : UserControl
     private bool _buildHoverValid;
     private VoxelCell _buildAnchor;
     private VoxelCell _buildHover;
+    private TerrainFoundationMode _buildFoundation = TerrainFoundationMode.None;
+    private float _buildFoundationDepth = 4f;
+
+    // 3D terrain shaper state. This is deliberately separate from the block brush:
+    // it edits terrain columns as volumes, so subtract and smooth keep a usable surface.
+    private TerrainSculptMode _terrainMode = TerrainSculptMode.Add;
+    private TerrainBrushVolume _terrainVolume = TerrainBrushVolume.Sphere;
+    private int _terrainRadius = 4;
+    private double _terrainCellSize = 1.0;
+    private float _terrainStrength = 1f;
+    private int _terrainMaterial = 8;
+    private Col _terrainColor = new(0.33f, 0.55f, 0.28f, 1f);
+    private bool _terrainStroke;
+    private bool _terrainHoverValid;
+    private Vec3 _terrainPoint;
+    private (int X, int Y, int Z) _terrainLastCell;
+    private string _terrainPreviewKey = "";
     private readonly List<Point3D> _buildPolygon = new();
     private Point3D? _buildPolygonHover;
     private double _buildPolygonY;
@@ -139,6 +156,7 @@ public partial class SceneView : UserControl
     public event Action<LevelNode>? NodePlaced;
     public event Action? DeleteRequested;
     public event Action<BlockBrushResult>? BrushApplied;
+    public event Action<TerrainSculptResult>? TerrainSculpted;
     public event Action<string>? MeasurementChanged;
     public event Action<Vec3, Quat>? PrefabStampRequested;
     public event Action<List<LevelNode>, string>? StructureRequested;
@@ -187,6 +205,19 @@ public partial class SceneView : UserControl
         get => _buildColor;
         set { _buildColor = value; RefreshBuildPreview(); }
     }
+
+    public TerrainFoundationMode BuildFoundation
+    {
+        get => _buildFoundation;
+        set { _buildFoundation = value; RefreshBuildPreview(); }
+    }
+
+    public float BuildFoundationDepth
+    {
+        get => _buildFoundationDepth;
+        set => _buildFoundationDepth = Math.Clamp(value, 0.5f, 40f);
+    }
+
     public double RotationSnap { get; set; } = 15;
     /// <summary>Grid keeps the classic behaviour; Face/Edge/Center snap to the surface
     /// under the cursor so blocks line up with existing geometry.</summary>
@@ -285,6 +316,59 @@ public partial class SceneView : UserControl
     }
 
     public bool BrushActive => !PlayMode && _tool == EditorTool.Brush && _brushMode != BlockBrushMode.None;
+    public bool TerrainActive => !PlayMode && _tool == EditorTool.Terrain;
+    public TerrainSculptMode TerrainMode
+    {
+        get => _terrainMode;
+        set { _terrainMode = value; UpdateModeLabel(); RefreshTerrainPreview(); }
+    }
+
+    public TerrainBrushVolume TerrainVolume
+    {
+        get => _terrainVolume;
+        set { _terrainVolume = value; UpdateModeLabel(); RefreshTerrainPreview(); }
+    }
+
+    public int TerrainRadius
+    {
+        get => _terrainRadius;
+        set
+        {
+            _terrainRadius = Math.Clamp(value, 1, 16);
+            RefreshTerrainPreview();
+            UpdateModeLabel();
+        }
+    }
+
+    public double TerrainCellSize
+    {
+        get => _terrainCellSize;
+        set
+        {
+            _terrainCellSize = Math.Clamp(value, 0.25, 4.0);
+            _terrainLastCell = (int.MaxValue, int.MaxValue, int.MaxValue);
+            RefreshTerrainPreview();
+            UpdateModeLabel();
+        }
+    }
+
+    public float TerrainStrength
+    {
+        get => _terrainStrength;
+        set { _terrainStrength = Math.Clamp(value, 0.05f, 1f); RefreshTerrainPreview(); }
+    }
+
+    public int TerrainMaterial
+    {
+        get => _terrainMaterial;
+        set { _terrainMaterial = value; RefreshTerrainPreview(); }
+    }
+
+    public Col TerrainColor
+    {
+        get => _terrainColor;
+        set { _terrainColor = value; RefreshTerrainPreview(); }
+    }
 
     /// <summary>Camera-relative axes used by the play-mode character controller.</summary>
     public Vec3 PlayForward
@@ -444,7 +528,8 @@ public partial class SceneView : UserControl
         if (tool == EditorTool.Brush && _brushMode == BlockBrushMode.None)
             _brushMode = BlockBrushMode.Fill;
         if (tool != EditorTool.Build) CancelBuild();
-        Cursor = tool is EditorTool.Brush or EditorTool.Measure or EditorTool.Prefab or EditorTool.Build
+        if (tool != EditorTool.Terrain) CancelTerrainStroke();
+        Cursor = tool is EditorTool.Brush or EditorTool.Terrain or EditorTool.Measure or EditorTool.Prefab or EditorTool.Build
             ? Cursors.Cross : null;
         if (tool != EditorTool.Prefab) HidePrefabPreview();
         if (tool == EditorTool.Measure)
@@ -460,12 +545,15 @@ public partial class SceneView : UserControl
         RefreshGizmo();
         RefreshBrushPreview();
         RefreshBuildPreview();
+        RefreshTerrainPreview();
     }
 
     private void UpdateModeLabel()
     {
         string mode = _tool == EditorTool.Brush
             ? "Brush • " + BlockBrushModeInfo.Display(_brushMode)
+            : _tool == EditorTool.Terrain
+                ? "Terrain • " + _terrainMode + " • " + _terrainVolume
             : _tool == EditorTool.Build
                 ? "Draw • " + _buildShape + (SnapMode == SmartSnapMode.Face ? " • face snap" : "")
                 : _tool + (PlacementEnabled ? " • Place" : "");
@@ -473,6 +561,7 @@ public partial class SceneView : UserControl
         ModeHint.Text = _tool switch
         {
             EditorTool.Brush => "  •  LMB paint   RMB orbit   MMB pan   Wheel zoom   Esc cancel",
+            EditorTool.Terrain => "  •  LMB sculpt   RMB orbit   MMB pan   Wheel zoom   [ / ] brush size   Esc cancel",
             EditorTool.Measure => "  •  LMB set points   Esc clear   RMB orbit   Wheel zoom",
             EditorTool.Prefab => "  •  LMB stamp   [ / ] rotate 90°   RMB orbit   Wheel zoom",
             EditorTool.Build => _buildShape == BuildShape.Polygon
@@ -562,6 +651,8 @@ public partial class SceneView : UserControl
         _brushPreviewState = null;
         _brushFillPreviewNode = null;
         RefreshBrushPreview();
+        _terrainPreviewKey = "";
+        RefreshTerrainPreview();
     }
 
     // ================= play mode view =================
@@ -629,7 +720,7 @@ public partial class SceneView : UserControl
     private void RefreshGizmo()
     {
         _gizmoModels.Clear();
-        if (_level == null || _selection.Count == 0 || _tool is EditorTool.Select or EditorTool.Measure or EditorTool.Prefab || BrushActive || BuildActive)
+        if (_level == null || _selection.Count == 0 || _tool is EditorTool.Select or EditorTool.Measure or EditorTool.Prefab || BrushActive || BuildActive || TerrainActive)
         {
             GizmoVisual.Content = null;
             return;
@@ -963,7 +1054,19 @@ public partial class SceneView : UserControl
     public void FrameAll()
     {
         if (_level == null) return;
-        var nodes = _level.AllNodes().Where(n => n.Kind != NodeKind.Group).ToList();
+        // Ignore hidden helper objects (GASM buses live at y = -2000 and generated
+        // animation triggers at y = -9999). Framing them would zoom away from the
+        // actual level, which is what happened to every split neural script.
+        var hiddenLayers = _level.EditorLayers.Where(l => !l.Visible).Select(l => l.Id).ToHashSet();
+        var visible = _level.AllNodes()
+            .Where(n => n.Kind != NodeKind.Group && !n.HideModel && !n.IsHidden &&
+                        !hiddenLayers.Contains(n.LayerId) && !(n.Generated && n.ScriptCreated))
+            .ToList();
+        var nodes = visible.Count > 0 ? visible : _level.AllNodes().Where(n => n.Kind != NodeKind.Group).ToList();
+        // Last line of defence for imported split levels, where a helper's hidden flag
+        // is not stored in the format: ignore anything parked far below the world.
+        var grounded = nodes.Where(n => n.WorldPosition.Y > -500f).ToList();
+        if (grounded.Count > 0) nodes = grounded;
         if (nodes.Count == 0) { _target = new Vec3(0, 0.5f, 0); _distance = 12; UpdateCamera(); return; }
         float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
         foreach (var n in nodes)
@@ -1254,6 +1357,7 @@ public partial class SceneView : UserControl
         _brushReplaceNodes.Clear();
         _brushStartBlock = null;
         if (_buildDragging) CancelBuildGestureOnly();
+        CancelTerrainStroke();
     }
 
     private void OnMouseDown(object sender, MouseButtonEventArgs e)
@@ -1283,6 +1387,12 @@ public partial class SceneView : UserControl
         if (BuildActive)
         {
             HandleBuildClick(pt, e.ClickCount);
+            e.Handled = true;
+            return;
+        }
+        if (TerrainActive)
+        {
+            BeginTerrainStroke(pt);
             e.Handled = true;
             return;
         }
@@ -1440,6 +1550,13 @@ public partial class SceneView : UserControl
             UpdatePrefabPreview(pt);
             return;
         }
+        if (TerrainActive)
+        {
+            UpdateTerrainHover(pt);
+            if (_terrainStroke && e.LeftButton == MouseButtonState.Pressed)
+                ApplyTerrainAt(_terrainPoint);
+            return;
+        }
         if (BuildActive)
         {
             UpdateBuildHover(pt);
@@ -1568,6 +1685,13 @@ public partial class SceneView : UserControl
             if (BrushActive)
             {
                 if (_brushStroke) FinishBrushStroke();
+                if (IsMouseCaptured) ReleaseMouseCapture();
+                e.Handled = true;
+                return;
+            }
+            if (TerrainActive)
+            {
+                _terrainStroke = false;
                 if (IsMouseCaptured) ReleaseMouseCapture();
                 e.Handled = true;
                 return;
@@ -1705,6 +1829,121 @@ public partial class SceneView : UserControl
         _buildPreviewKey = "";
         if (IsMouseCaptured) ReleaseMouseCapture();
         if (BuildVisual != null) BuildVisual.Content = null;
+    }
+
+    // ================= 3D terrain shaper =================
+
+    private void BeginTerrainStroke(Point pt)
+    {
+        if (!TryTerrainPick(pt, out var point))
+        {
+            RefreshTerrainPreview();
+            return;
+        }
+        _terrainStroke = true;
+        _terrainPoint = point;
+        _terrainHoverValid = true;
+        _terrainLastCell = (int.MaxValue, int.MaxValue, int.MaxValue);
+        CaptureMouse();
+        ApplyTerrainAt(point);
+    }
+
+    private void UpdateTerrainHover(Point pt)
+    {
+        if (TryTerrainPick(pt, out var point))
+        {
+            _terrainPoint = point;
+            _terrainHoverValid = true;
+        }
+        else _terrainHoverValid = false;
+        RefreshTerrainPreview();
+    }
+
+    private bool TryTerrainPick(Point pt, out Vec3 point)
+    {
+        if (TryBrushPick(pt, out var pick))
+        {
+            point = new Vec3((float)pick.Point.X, (float)pick.Point.Y, (float)pick.Point.Z);
+            return true;
+        }
+        point = Vec3.Zero;
+        return false;
+    }
+
+    private void ApplyTerrainAt(Vec3 point)
+    {
+        if (_level == null) return;
+        var cell = BlockBrushMath.CellAt(point, _terrainCellSize);
+        var key = (cell.X, cell.Y, cell.Z);
+        if (key == _terrainLastCell) return;
+        _terrainLastCell = key;
+        var result = TerrainSculptor.Apply(_level, point, new TerrainSculptSettings
+        {
+            Mode = _terrainMode,
+            Volume = _terrainVolume,
+            Radius = _terrainRadius,
+            Strength = _terrainStrength,
+            Material = _terrainMaterial,
+            Color = _terrainColor,
+            CellSize = _terrainCellSize
+        });
+        if (result.Count == 0)
+        {
+            TerrainSculpted?.Invoke(result);
+            return;
+        }
+        _level.IsDirty = true;
+        Refresh();
+        SceneModified?.Invoke();
+        TerrainSculpted?.Invoke(result);
+    }
+
+    private void CancelTerrainStroke()
+    {
+        _terrainStroke = false;
+        if (IsMouseCaptured) ReleaseMouseCapture();
+    }
+
+    private void RefreshTerrainPreview()
+    {
+        if (TerrainVisual == null) return;
+        if (!TerrainActive || _level == null || !_terrainHoverValid)
+        {
+            TerrainVisual.Content = null;
+            _terrainPreviewKey = "";
+            return;
+        }
+        var centre = BlockBrushMath.CellAt(_terrainPoint, _terrainCellSize);
+        string key = _terrainMode + "|" + _terrainVolume + "|" + _terrainRadius + "|" + _terrainCellSize.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + centre.X + "," + centre.Y + "," + centre.Z;
+        if (key == _terrainPreviewKey) return;
+        _terrainPreviewKey = key;
+        var centreWorld = BlockBrushMath.Center(centre, _terrainCellSize);
+        var p = new Point3D(centreWorld.X, centreWorld.Y, centreWorld.Z);
+        double r = _terrainRadius * _terrainCellSize;
+        var mesh = new MeshBuilder();
+        double thickness = Math.Max(0.025, r * 0.018);
+        if (_terrainVolume == TerrainBrushVolume.Box)
+        {
+            mesh.WireBox(p, new Vector3D(r * 2, r * 2, r * 2), thickness);
+            mesh.WireBox(p, new Vector3D(r * 1.5, r * 1.5, r * 1.5), thickness * 0.65);
+        }
+        else
+        {
+            mesh.Circle(p, new Vector3D(0, 1, 0), r, thickness);
+            mesh.Circle(p, new Vector3D(1, 0, 0), r, thickness);
+            mesh.Circle(p, new Vector3D(0, 0, 1), r, thickness);
+            mesh.WireBox(p, new Vector3D(r * 2, r * 2, r * 2), thickness * 0.65);
+        }
+        var color = _terrainMode switch
+        {
+            TerrainSculptMode.Remove => new Col(1f, 0.35f, 0.25f, 1f),
+            TerrainSculptMode.Paint => _terrainColor,
+            TerrainSculptMode.Smooth => new Col(0.35f, 0.75f, 1f, 1f),
+            TerrainSculptMode.Flatten => new Col(1f, 0.85f, 0.3f, 1f),
+            _ => new Col(0.35f, 1f, 0.45f, 1f)
+        };
+        var material = BrushPreviewMaterial(color, 230);
+        TerrainVisual.Content = new GeometryModel3D(mesh.ToMesh(), material) { BackMaterial = material };
     }
 
     private bool TryBuildSurfacePoint(Point pt, out Point3D point)
@@ -1928,6 +2167,7 @@ public partial class SceneView : UserControl
     private BlockBrushResult PlaceBuildPlan(BrushPlan plan, string label)
     {
         int created = 0;
+        var placed = new List<LevelNode>();
         if (_level != null && plan.Cells.Count > 0)
         {
             var group = new LevelNode
@@ -1955,11 +2195,14 @@ public partial class SceneView : UserControl
                 group.Children.Add(node);
                 node.RebuildParents(group);
                 occupancy[cell] = node;
+                placed.Add(node);
                 created++;
             }
             if (created == 0) _level.Nodes.Remove(group);
             else
             {
+                if (_buildFoundation != TerrainFoundationMode.None)
+                    TerrainSculptor.PrepareFoundation(_level, placed, _buildFoundation, _buildFoundationDepth);
                 _level.EnsureNames();
                 _level.IsDirty = true;
             }
@@ -2656,6 +2899,11 @@ public partial class SceneView : UserControl
             }
         }
         if (e.Key == Key.F) { FocusSelected(); e.Handled = true; }
+        else if (TerrainActive && (e.Key == Key.OemOpenBrackets || e.Key == Key.OemCloseBrackets))
+        {
+            TerrainRadius += e.Key == Key.OemCloseBrackets ? 1 : -1;
+            e.Handled = true;
+        }
         else if (e.Key == Key.W) { SetTool(EditorTool.Move); e.Handled = true; }
         else if (e.Key == Key.E) { SetTool(EditorTool.Rotate); e.Handled = true; }
         else if (e.Key == Key.R) { SetTool(EditorTool.Scale); e.Handled = true; }

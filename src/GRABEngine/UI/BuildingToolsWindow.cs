@@ -33,6 +33,8 @@ public sealed class StructureStudioWindow : Window
     private readonly CheckBox _hollow = Theme.Check("Hollow shell", true);
     private readonly CheckBox _mirrorX = Theme.Check("Mirror X", false);
     private readonly CheckBox _mirrorZ = Theme.Check("Mirror Z", false);
+    private readonly ComboBox _foundation = Theme.Combo(new[] { "None", "Level ground", "Carve foundation" });
+    private readonly TextBox _foundationDepth = Theme.TextBox("4");
     private readonly CheckBox _atSelection = Theme.Check("Build at view target", true);
     private readonly TextBlock _status = Theme.Hint("Adjust the settings and press Build.");
     private readonly TextBlock _summary = new() { Foreground = Theme.Text, FontSize = 11, Margin = new Thickness(0, 4, 0, 0) };
@@ -219,8 +221,9 @@ public sealed class StructureStudioWindow : Window
             _drawStatus.Foreground = Theme.Warning;
             return;
         }
+        var foundation = ApplyFoundation(nodes);
         Built?.Invoke(nodes, "Drawn Shape");
-        _drawStatus.Text = $"Drawn shape written: {nodes.Count} block(s).";
+        _drawStatus.Text = $"Drawn shape written: {nodes.Count} block(s)." + foundation;
         _drawStatus.Foreground = Theme.Ok;
     }
 
@@ -252,6 +255,10 @@ public sealed class StructureStudioWindow : Window
         settings.Children.Add(_mirrorX);
         settings.Children.Add(_mirrorZ);
         settings.Children.Add(Theme.Hint("Mirror creates a second copy across the symmetry pivot, so a half-built structure becomes a full one."));
+        settings.Children.Add(Theme.SectionHeader("TERRAIN FOUNDATION"));
+        settings.Children.Add(Theme.Row("Under structure", _foundation));
+        settings.Children.Add(Theme.Row("Carve depth", _foundationDepth));
+        settings.Children.Add(Theme.Hint("Level ground trims or fills terrain to the structure base. Carve foundation cuts a clean pit and leaves a floor. The depth only applies to carving."));
         settings.Children.Add(Theme.SectionHeader("QUICK BUILD"));
         var quick = new StackPanel { Orientation = Orientation.Horizontal };
         var quickStairs = Theme.Button("Stairs", small: true);
@@ -391,8 +398,9 @@ public sealed class StructureStudioWindow : Window
             _status.Foreground = Theme.Warning;
             return;
         }
+        var foundation = ApplyFoundation(plan.Nodes);
         Built?.Invoke(plan.Nodes, plan.Name);
-        _status.Text = plan.Summary + " written.";
+        _status.Text = plan.Summary + " written." + foundation;
         _status.Foreground = Theme.Ok;
     }
 
@@ -406,8 +414,9 @@ public sealed class StructureStudioWindow : Window
             _status.Foreground = Theme.Warning;
             return;
         }
+        var foundation = ApplyFoundation(plan.Nodes);
         Built?.Invoke(plan.Nodes, plan.Name);
-        _status.Text = plan.Summary + " written.";
+        _status.Text = plan.Summary + " written." + foundation;
         _status.Foreground = Theme.Ok;
     }
 
@@ -440,8 +449,9 @@ public sealed class StructureStudioWindow : Window
             _status.Foreground = Theme.Warning;
             return;
         }
+        var foundation = ApplyFoundation(nodes);
         Built?.Invoke(nodes, "Extrusion");
-        _status.Text = $"Extruded {nodes.Count} block(s) from {points.Count} outline point(s).";
+        _status.Text = $"Extruded {nodes.Count} block(s) from {points.Count} outline point(s)." + foundation;
         _status.Foreground = Theme.Ok;
     }
 
@@ -461,9 +471,24 @@ public sealed class StructureStudioWindow : Window
             _status.Foreground = Theme.Warning;
             return;
         }
+        var foundation = ApplyFoundation(nodes);
         Built?.Invoke(nodes, ShapeInfo.Display(shape));
-        _status.Text = $"{ShapeInfo.Display(shape)}: {nodes.Count} block(s) written.";
+        _status.Text = $"{ShapeInfo.Display(shape)}: {nodes.Count} block(s) written." + foundation;
         _status.Foreground = Theme.Ok;
+    }
+
+    private string ApplyFoundation(IReadOnlyList<LevelNode> nodes)
+    {
+        var mode = _foundation.SelectedIndex switch
+        {
+            1 => TerrainFoundationMode.LevelGround,
+            2 => TerrainFoundationMode.CarveFoundation,
+            _ => TerrainFoundationMode.None
+        };
+        if (mode == TerrainFoundationMode.None) return "";
+        var result = TerrainSculptor.PrepareFoundation(_level, nodes, mode,
+            ParseFloat(_foundationDepth.Text, 4, 0.5f, 40), 1.0);
+        return result.Columns == 0 ? "" : "  ·  " + result.Summary;
     }
 
     private static int ParseInt(string text, int fallback, int min, int max)

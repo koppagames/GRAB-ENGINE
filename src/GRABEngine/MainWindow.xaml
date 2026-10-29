@@ -115,6 +115,7 @@
             <MenuItem Header="_Tools">
                 <MenuItem Header="Level Library..." Click="LevelLibrary_Click"/>
                 <MenuItem Header="Draw Structures..." InputGestureText="G" Click="BuildTool_Click"/>
+                <MenuItem Header="Terrain Sculptor..." InputGestureText="T" Click="TerrainTool_Click"/>
                 <MenuItem Header="Terrain &amp; World Builder..." Click="Terrain_Click"/>
                 <MenuItem Header="Structure Studio (Advanced)..." Click="StructureStudio_Click"/>
                 <MenuItem Header="Build Validation..." Click="ValidateLevel_Click"/>
@@ -123,6 +124,7 @@
                 <MenuItem Header="Prefab &amp; Asset Palette..." Click="PrefabPalette_Click"/>
                 <MenuItem Header="Audio Studio..." Click="AudioStudio_Click"/>
                 <MenuItem Header="Text to Speech..." Click="TextToSpeech_Click"/>
+                <MenuItem Header="Neural Lab..." Click="NeuralLab_Click"/>
                 <Separator/>
                 <MenuItem Header="Search Hierarchy" InputGestureText="Ctrl+F" Click="FocusHierarchySearch_Click"/>
                 <MenuItem Header="Manage Layers..." Click="ManageLayers_Click"/>
@@ -154,6 +156,9 @@
                     <ToggleButton x:Name="ToolScale" Style="{StaticResource ToolButton}" Content="⤢  Scale" Tag="Scale" Click="Tool_Click" ToolTip="Scale (R)"/>
                     <ToggleButton x:Name="ToolBrush" Style="{StaticResource ToolButton}" Tag="Brush" Click="Tool_Click" ToolTip="Block brush — Fill, Replace, Erase, Line, Box, Sphere (B)">
                         <TextBlock Text="▦  Brush" Foreground="#FFE8E8E8"/>
+                    </ToggleButton>
+                    <ToggleButton x:Name="ToolTerrain" Style="{StaticResource ToolButton}" Tag="Terrain" Click="Tool_Click" ToolTip="Terrain shaper — add, subtract, smooth, flatten and paint real terrain blocks (T)">
+                        <TextBlock Text="⛰  Terrain" Foreground="#FFE8E8E8"/>
                     </ToggleButton>
                     <ToggleButton x:Name="ToolBuild" Style="{StaticResource ToolButton}" Tag="Build" Click="Tool_Click" ToolTip="Draw structures — drag a footprint or draw a custom polygon (G)">
                         <TextBlock Text="✎  Draw" Foreground="#FFE8E8E8"/>
@@ -348,12 +353,116 @@
                                         ToolTip="Move the mirror pivot to the centre of the selection"/>
                             </Grid>
                         </Grid>
+                        <DockPanel Margin="0,7,0,0">
+                            <Button x:Name="BrushFavoriteButton" DockPanel.Dock="Right" Content="☆ Save preset"
+                                    Style="{StaticResource MiniButton}" Padding="8,2" Click="BrushFavorite_Click"
+                                    ToolTip="Save the current material, colour, shape and cell setup as a favourite"/>
+                            <TextBlock Text="SMART PALETTE" Foreground="#FF9A9A9A" FontSize="9.5" FontWeight="SemiBold"
+                                       VerticalAlignment="Center"/>
+                        </DockPanel>
+                        <TextBlock Text="Recent" Foreground="#FF747474" FontSize="10" Margin="0,2,0,2"/>
+                        <WrapPanel x:Name="BrushRecentPanel"/>
+                        <TextBlock Text="Favourites" Foreground="#FF747474" FontSize="10" Margin="0,4,0,2"/>
+                        <WrapPanel x:Name="BrushFavoritesPanel"/>
                         <TextBlock x:Name="BrushHint" Text="Click a block to flood-fill its connected island with the selected material."
-                                   Foreground="#FF9A9A9A" FontSize="10.5" TextWrapping="Wrap" Margin="0,7,0,0"/>
+                                   Foreground="#FF9A9A9A" FontSize="10.5" TextWrapping="Wrap" Margin="0,5,0,0"/>
                         <TextBlock Text="LMB gesture  •  RMB orbit  •  Esc cancel  •  4096 cells max"
                                    Foreground="#FF707070" FontSize="10" Margin="0,3,0,2"/>
                         <TextBlock Text="Mirror repeats each stroke across the pivot on the chosen axes."
                                    Foreground="#FF707070" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,2"/>
+                    </StackPanel>
+                </Border>
+                <Border x:Name="TerrainPalette" Grid.Row="0" Width="392" Visibility="Collapsed"
+                        HorizontalAlignment="Left" VerticalAlignment="Top" Margin="12,48,0,0"
+                        Background="#F22A2A2A" BorderBrush="#FF505050" BorderThickness="1" CornerRadius="4"
+                        Padding="10" Panel.ZIndex="22">
+                    <StackPanel>
+                        <DockPanel Margin="0,0,0,7">
+                            <Button x:Name="TerrainClose" DockPanel.Dock="Right" Content="×" FontSize="15" Padding="6,0" Margin="0"
+                                    Style="{StaticResource MiniButton}" Click="TerrainClose_Click" ToolTip="Close terrain shaper"/>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="⛰" Foreground="#FF6FC8FF" FontSize="15" VerticalAlignment="Center"/>
+                                <TextBlock Text="TERRAIN SHAPER" FontSize="11" FontWeight="SemiBold" Margin="7,0,0,0"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </DockPanel>
+                        <WrapPanel Margin="0,0,0,3">
+                            <ToggleButton x:Name="TerrainAdd" Style="{StaticResource ToolButton}" Tag="Add" Click="TerrainMode_Click">
+                                <TextBlock Text="Add" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                            <ToggleButton x:Name="TerrainRemove" Style="{StaticResource ToolButton}" Tag="Remove" Click="TerrainMode_Click">
+                                <TextBlock Text="Erase" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                            <ToggleButton x:Name="TerrainSmooth" Style="{StaticResource ToolButton}" Tag="Smooth" Click="TerrainMode_Click">
+                                <TextBlock Text="Smooth" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                            <ToggleButton x:Name="TerrainFlatten" Style="{StaticResource ToolButton}" Tag="Flatten" Click="TerrainMode_Click">
+                                <TextBlock Text="Flatten" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                            <ToggleButton x:Name="TerrainPaint" Style="{StaticResource ToolButton}" Tag="Paint" Click="TerrainMode_Click">
+                                <TextBlock Text="Paint" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                        </WrapPanel>
+                        <Grid Margin="0,7,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="28"/>
+                                <RowDefinition Height="28"/>
+                                <RowDefinition Height="28"/>
+                                <RowDefinition Height="28"/>
+                                <RowDefinition Height="28"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="74"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Row="0" Text="Brush" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="TerrainShapeCombo" Grid.Row="0" Grid.Column="1" Height="23" SelectionChanged="TerrainShape_Changed">
+                                <ComboBoxItem Content="Sphere"/>
+                                <ComboBoxItem Content="Box"/>
+                                <ComboBoxItem Content="Cylinder"/>
+                            </ComboBox>
+                            <TextBlock Grid.Row="1" Text="Size" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center"/>
+                            <DockPanel Grid.Row="1" Grid.Column="1">
+                                <TextBlock x:Name="TerrainSizeValue" DockPanel.Dock="Right" Text="4" Width="24"
+                                           Foreground="#FFD8D8D8" FontSize="11" VerticalAlignment="Center" TextAlignment="Right"/>
+                                <Slider x:Name="TerrainSizeSlider" Minimum="1" Maximum="16" Value="4"
+                                        TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center"
+                                        ValueChanged="TerrainSize_Changed"/>
+                            </DockPanel>
+                            <TextBlock Grid.Row="2" Text="Strength" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center"/>
+                            <DockPanel Grid.Row="2" Grid.Column="1">
+                                <TextBlock x:Name="TerrainStrengthValue" DockPanel.Dock="Right" Text="100%" Width="38"
+                                           Foreground="#FFD8D8D8" FontSize="11" VerticalAlignment="Center" TextAlignment="Right"/>
+                                <Slider x:Name="TerrainStrengthSlider" Minimum="0.05" Maximum="1" Value="1"
+                                        TickFrequency="0.05" VerticalAlignment="Center"
+                                        ValueChanged="TerrainStrength_Changed"/>
+                            </DockPanel>
+                            <TextBlock Grid.Row="3" Text="Material" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="TerrainMaterialCombo" Grid.Row="3" Grid.Column="1" Height="23"
+                                      SelectionChanged="TerrainMaterial_Changed"/>
+                            <TextBlock Grid.Row="4" Text="Grid" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="TerrainCellCombo" Grid.Row="4" Grid.Column="1" Height="23"
+                                      SelectionChanged="TerrainCell_Changed"
+                                      ToolTip="Terrain block size — use 0.5 m for detail, 1 m for normal terrain, 2 m for chunky landscape">
+                                <ComboBoxItem Content="0.5 m"/>
+                                <ComboBoxItem Content="1 m"/>
+                                <ComboBoxItem Content="2 m"/>
+                            </ComboBox>
+                        </Grid>
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                            <Border x:Name="TerrainColorSwatch" Width="24" Height="18" CornerRadius="2"
+                                    BorderBrush="#FF606060" BorderThickness="1" Margin="0,0,5,0"/>
+                            <TextBox x:Name="TerrainColorBox" Width="78" Height="22" ToolTip="Terrain colour (Default Colored material)"
+                                     LostFocus="TerrainColor_Changed" KeyDown="TerrainColor_KeyDown"/>
+                            <TextBlock Text="Colour only affects Default Colored" Foreground="#FF808080" FontSize="10"
+                                       VerticalAlignment="Center" Margin="7,0,0,0"/>
+                        </StackPanel>
+                        <TextBlock x:Name="TerrainHint" Text="LMB sculpt  •  RMB orbit  •  [ / ] brush size  •  Esc cancel"
+                                   Foreground="#FF9A9A9A" FontSize="10.5" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                        <TextBlock Text="Add fills a volume, Erase removes it, Smooth evens the surface, Flatten sets a level and Paint changes material/colour. Grid controls the block size; the brush centre follows the block you point at."
+                                   Foreground="#FF707070" FontSize="10" TextWrapping="Wrap" Margin="0,3,0,2"/>
+                        <Button Content="Open Heightmap Studio…" Style="{StaticResource MiniButton}" Padding="8,3"
+                                Click="TerrainStudioFromPalette_Click" Margin="0,4,0,0" HorizontalAlignment="Left"/>
                     </StackPanel>
                 </Border>
                 <Border x:Name="BuildPalette" Grid.Row="0" Width="430" Visibility="Collapsed"
@@ -423,6 +532,25 @@
                                 <TextBlock Text="Material" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center" Margin="9,0,5,0"/>
                                 <ComboBox x:Name="BuildMaterialCombo" Width="135" Height="23" SelectionChanged="BuildMaterial_Changed"/>
                             </StackPanel>
+                        </Grid>
+                        <Grid Margin="0,5,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="28"/>
+                                <RowDefinition Height="28"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="96"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Row="0" Text="Foundation" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="BuildFoundationCombo" Grid.Row="0" Grid.Column="1" Height="23" SelectionChanged="BuildFoundation_Changed">
+                                <ComboBoxItem Content="None"/>
+                                <ComboBoxItem Content="Level ground"/>
+                                <ComboBoxItem Content="Carve foundation"/>
+                            </ComboBox>
+                            <TextBlock Grid.Row="1" Text="Carve depth" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center"/>
+                            <TextBox x:Name="BuildFoundationDepth" Grid.Row="1" Grid.Column="1" Height="23" Text="4"
+                                     LostFocus="BuildFoundationDepth_Changed" KeyDown="BuildFoundationDepth_KeyDown"/>
                         </Grid>
                         <TextBlock x:Name="BuildHint" Text="LMB drag a footprint  •  [ / ] change height  •  Esc cancel  •  RMB orbit"
                                    Foreground="#FF707070" FontSize="10" TextWrapping="Wrap" Margin="0,6,0,2"/>

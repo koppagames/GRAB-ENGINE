@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json.Serialization;
+using GrabEngine.AI;
 
 namespace GrabEngine.Core;
 
@@ -483,6 +484,9 @@ public class GrabLevel
     public string PrefabVariantOf { get; set; } = "";
     public AmbienceSettings Ambience { get; set; } = new();
     public List<LevelNode> Nodes { get; set; } = new();
+
+    /// <summary>Persistent Neural Lab graph, bindings and trained weights (editor-only).</summary>
+    public NeuralLabConfig? NeuralLab { get; set; }
 
     /// <summary>Editor-only layers (visibility, locking and organisation).</summary>
     public List<EditorLayer> EditorLayers { get; set; } = new();

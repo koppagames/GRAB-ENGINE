@@ -25,6 +25,7 @@
             <!-- Brush ghosts live in the overlay viewport too, so a placement preview
                  remains readable even when the target cell is behind a block. -->
             <ModelVisual3D x:Name="BrushVisual"/>
+            <ModelVisual3D x:Name="TerrainVisual"/>
             <ModelVisual3D x:Name="BuildVisual"/>
             <ModelVisual3D x:Name="MeasureVisual"/>
             <!-- Build validation markers sit in the overlay viewport so a red box is

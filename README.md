@@ -60,7 +60,9 @@ dotnet publish src\GRABEngine -c Release -o app
 * Block brush with Fill, Replace, **Erase**, Line, Box and Sphere modes (B), shape/material/
   cell-size palette, vertical layers, hollow shells and live ghost previews. Each stroke is
   one undo step and is grouped in the hierarchy, so a 500-block voxel wall does not bury the
-  scene. Optional X/Z/Both symmetry mirrors every stroke across a movable pivot.
+  scene. Optional X/Z/Both symmetry mirrors every stroke across a movable pivot. The **Smart
+  Palette** remembers recent brush setups and lets you save favourites with **☆ Save preset**;
+  clicking a chip restores its material, colour, shape, cell size, layers and hollow flag.
 
 * Prefab library with save/spawn plus a **prefab stamp brush**: pick a prefab, move the live
   preview across the level, rotate with `[` / `]`, and click to place as many copies as you
@@ -86,11 +88,23 @@ dotnet publish src\GRABEngine -c Release -o app
   terrain appears in the Hierarchy as selectable chunk groups, and **Slope-aware scatter**
   places prefabs only on valid slope/height bands.
 
+* **3D Terrain Shaper** (T, or the ⛰ Terrain toolbar button): a Roblox-style scene brush with
+  **Add**, **Erase**, **Smooth**, **Flatten** and **Paint** modes. Choose Sphere, Box or
+  Cylinder, size, strength and a **0.5 m / 1 m / 2 m grid** (fine detail, normal or chunky
+  terrain), then drag directly on the terrain. Add fills a solid block volume; Erase removes a
+  rounded volume and rebuilds the affected columns so the cut follows the surface instead of
+  deleting whole hills; Smooth evens the top, Flatten sets a level and Paint changes
+  material/colour. Strength is used by Smooth; Add/Erase/Paint write exact volumes. All results
+  are ordinary GRAB blocks and remain editable with the block brush. The heightmap studio is
+  still available from the palette.
+
 * **Draw Structures** (G, or Tools → Draw Structures): drag a footprint in the scene to make a
   box, sphere, cylinder, cone, staircase or ramp, with a live block preview. **Custom Shape**
   draws a polygon point by point and extrudes it into blocks. Height is one slider (`[` / `]`
   also work), materials/colours are in the palette, and Face snap builds directly against the
-  block you point at.
+  block you point at. The palette now has **Level ground** and **Carve foundation** modes that
+  trim or fill the terrain under the footprint before the blocks are placed; the Structure &
+  Shape Studio exposes the same setting with a carve-depth field.
 
 * **Structure & Shape Studio** (Tools): the first tab is a click-to-draw footprint grid that
   extrudes a custom outline; no X/Z entry. Presets add stairs, ramps, spiral stairs, bridges,
@@ -106,8 +120,14 @@ dotnet publish src\GRABEngine -c Release -o app
   or over-limit triggers, broken object connections, script errors, GRAB limits and finish
   reachability. Problems select the object and highlight it in the scene.
 
-* **Level Optimizer & Budget** (Tools): merges coplanar voxels, collapses hidden interior
-  blocks, reports object/complexity budgets and can apply safe reductions before export.
+* **Level Optimizer & Budget** (Tools): reports object/complexity budgets and offers
+  **Merge adjacent identical cubes**, **Merge different block sizes on a shared grid** (0.25 m,
+  0.5 m, 1 m, 2 m or 4 m — useful for terrain columns and mixed-height builds), **Remove fully
+  enclosed blocks**, **Remove exact duplicate blocks**, **Remove zero-size blocks** and optional
+  **Remove empty groups**. Protected physics, locked and animated objects are skipped. The
+  mixed-size pass rebuilds each identical material/colour group on the chosen grid, so a 1×4
+  column and its 1×1 cap can become one block without changing the occupied volume; culling runs
+  after the merge so a solid region can collapse first.
 
 * **Prefab & Asset Palette** (Tools): thumbnail browser for the prefab library with Stamp,
   Spawn and Save Selection actions.
@@ -260,6 +280,51 @@ dotnet publish src\GRABEngine -c Release -o app
 
 * In-editor help viewer for this README, `CSharpReference.md` and `GASMReference.md`.
 
+### Neural Lab graph controllers
+
+**Tools → Neural Lab…** is the general controller authoring tool, not just the demo trainer.
+You can build any number of dense layers (up to four hidden layers), choose an activation,
+edit every weight and bias, and connect real GRAB scene objects to the inputs and outputs.
+
+* **Quick Start.** Pick the **Target** (the object the network should chase) and the
+
+  **Controlled** object (the one that moves), then press **Build chase controller**. That creates a
+  ready 3 → 8 → 3 steering network; **+ Target inputs** and **+ Movement outputs** add just those
+  bindings if you want to build the graph yourself.
+
+* **Connect objects directly.** Pick a block, light, sign, trigger or group and use
+
+  **Read every property → Inputs** / **Write every property → Outputs**, or add just Position,
+  Rotation or Color. Inputs can be relative to another object, so `Target.Position — Ball.Position`
+  becomes a direction vector. Outputs support **Set** and **Add** (Add on Position/Rotation is a
+  velocity). Level registers `Var1`–`Var5`, player position/velocity/rotation/color, Time and
+
+  **Sign Write (ASCII code)** are available too. Sign Write is the text escape hatch: one output
+  writes one character code per frame, so several signs can spell dynamic messages.
+
+* **Target behaviour.** **Static** keeps the goal at its level position. **Animated** follows the
+  target's first animation clip, which is the closest match to a moving block in the real level.
+
+  **Orbit**, **Random walk** and **Teleport** move the goal before every input read during editor
+  training, so the network learns to follow the *current* target instead of memorising where it
+  started. Target speed is degrees/sec for Orbit and blocks/sec for Random walk; Radius controls
+  the training bubble.
+
+* **Train here or in the level.** **Editor** trains a population in the editor and bakes all
+  weights. **In-game** exports a second trainer Code Block and tunes shared output weights while
+  Play mode or retail GRAB is running. **Editor + in-game** does both.
+  
+* **GRAB-safe runtime tuning.** Tunable weights are stored six per hidden weight-bus object
+  (three Position XYZ values and three Rotation XYZ values, with one position parked below the
+  level so GRAB hides the helper). The controller reads the buses and the trainer only writes
+  them, so each Code Block stays under 150 instructions and 10 connections. **Weights tuned in
+  game** is 12, the verified maximum for a 3-output controller; lower it if you add many object
+  bindings and the summary turns yellow.
+
+* **Autosave/undo and export.** Project save/load keeps the graph, settings, code blocks and bus
+  objects. **Apply to Level** compiles both blocks, **Export .level** writes the real GRAB file, and
+  the **C# preview** tab shows the exact controller and trainer source that go to the compiler.
+
 ### Block brush
 
 Press **B** or click **Brush** in the toolbar. The palette stays in the scene view so you can
@@ -316,6 +381,7 @@ ambience/light targets. Stop restores the pre-play snapshot.
 | Right mouse + W A S D | Fly the camera; Space / Ctrl move up / down, Shift boosts |
 | Q / W / E / R | Select / Move / Rotate / Scale |
 | B | Block brush (Fill / Replace / Erase / Line / Box / Sphere) |
+| T | Terrain shaper (Add / Erase / Smooth / Flatten / Paint) |
 | G | Draw structures (footprint drag / custom polygon) |
 | M | Measure tool |
 | P | Prefab stamp tool (then choose a prefab) |
@@ -344,14 +410,20 @@ ambience/light targets. Stop restores the pre-play snapshot.
 ```
 GRABEngine.exe --selftest          runs the end-to-end checks, writes selftest.log
 GRABEngine.exe path\to\file        opens a .grabproj or .level
+GRABEngine.exe --train-neural project.grabproj [--hidden 4] [--generations 80]
+                                   trains the Neural Ball demo and writes the project,
+                                   .level, README and .training.txt report
 ```
 
 The self-test checks the full pipeline: C# compile, GASM emission, play-mode execution,
 project round-trip, `.level` round-trip, ambience, meshes and textures, every block-brush
-mode (including fill isolation and replace), GLB quad/triangle/voxel import with embedded
-texture sampling, sound synthesis, MP3 analysis and music-block scheduling, speech phonemes,
-formant/block rendering and speech-block scheduling, plus undo/redo (including
-continuous-gesture coalescing and a real editor scene edit).
+mode (including fill isolation and replace), the 3D terrain shaper and foundation preparation,
+mixed-size/duplicate optimisation, GLB quad/triangle/voxel import with embedded texture
+sampling, sound synthesis, MP3 analysis and music-block scheduling, speech phonemes,
+formant/block rendering and speech-block scheduling, the neural trainer and its early-stop
+rule (including a headless replay of the project and exported `.level`), a 12-object script
+that must split before the connection limit, plus undo/redo (including continuous-gesture
+coalescing and a real editor scene edit).
 
 ## How the game formats work
 

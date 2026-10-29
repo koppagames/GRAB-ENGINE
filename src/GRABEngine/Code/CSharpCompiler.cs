@@ -1212,6 +1212,17 @@ public sealed class CSharpCompiler
     private bool HasTriggerHooks() => Hook("OnTriggerEnter") != null || Hook("OnTriggerExit") != null ||
                                       Hook("OnTriggerStay") != null || Hook("OnSignal") != null;
 
+    /// <summary>Triggers that dispatch events into this Code Block. Split pages use this
+    /// to reserve connection slots before the event dispatcher is emitted at the end of
+    /// the body, so a page full of scene objects cannot silently drop trigger events.</summary>
+    private List<LevelNode> TriggerHookTargets()
+    {
+        if (_codeBlock == null || _objectIds == null || _level == null) return new List<LevelNode>();
+        return _level.AllNodes().Where(n => n.Kind == NodeKind.Trigger &&
+            n.TriggerTargets.Any(t => t.Kind == 7 &&
+                (t.ObjectId == _objectIds[_codeBlock] || string.Equals(t.ObjectName, _codeBlock.Name, StringComparison.OrdinalIgnoreCase)))).ToList();
+    }
+
     /// <summary>
     /// Event callbacks are real GASM: every frame the program reads the Active register
     /// of each Trigger that targets this Code Block and calls the matching hook on a
@@ -1236,10 +1247,7 @@ public sealed class CSharpCompiler
             });
             return;
         }
-        if (_codeBlock == null) return;
-        var targets = _level.AllNodes().Where(n => n.Kind == NodeKind.Trigger &&
-            n.TriggerTargets.Any(t => t.Kind == 7 &&
-                (t.ObjectId == _objectIds![_codeBlock] || string.Equals(t.ObjectName, _codeBlock.Name, StringComparison.OrdinalIgnoreCase)))).ToList();
+        var targets = TriggerHookTargets();
         if (targets.Count == 0)
         {
             _diags.Add(new Diagnostic
@@ -2689,11 +2697,29 @@ public sealed class CSharpCompiler
         foreach (var statement in method?.Body?.Statements ?? new List<Stmt>())
         {
             int spillCost = SpillCost();
-            if (any && _e.Program.Instructions.Count + spillCost > GrabLimits.MaxInstructions - 34 && spillCost < 112)
+            var statementObjects = ObjectsIn(statement);
+            var connectedIds = _e.Connections.Where(c => c.Type == GasmConnectionType.Node)
+                .Select(c => c.ObjectId).ToHashSet();
+            int newObjects = statementObjects.Count(n => _objectIds != null && _objectIds.TryGetValue(n, out var id) && !connectedIds.Contains(id));
+            bool connectionOverflow = any && _e.Connections.Count + newObjects > GrabLimits.MaxConnections;
+            // An instruction overflow can only be relieved when the page break leaves
+            // enough room for the spilled state. A connection overflow must always be
+            // relieved, otherwise the page is invalid even if it is short.
+            bool instructionOverflow = _e.Program.Instructions.Count + spillCost > GrabLimits.MaxInstructions - 34 && spillCost < 112;
+            if (any && (instructionOverflow || connectionOverflow))
                 SplitPage();
             CompileStmt(statement);
             any = true;
             if (_e.Program.Instructions.Count + spillCost > GrabLimits.MaxInstructions - 6 && spillCost < 112)
+                SplitPage();
+        }
+        // Event hooks are appended after the body. If the last body page is already
+        // using most of its connection slots, start a fresh page for the dispatcher
+        // instead of letting the trigger connections disappear with a warning.
+        if (!startOnly && HasTriggerHooks())
+        {
+            int reserved = TriggerHookTargets().Count;
+            if (reserved > 0 && _e.Connections.Count + reserved > GrabLimits.MaxConnections)
                 SplitPage();
         }
         if (!startOnly) EmitTriggerHooks();
@@ -2706,12 +2732,145 @@ public sealed class CSharpCompiler
             _pageZeroProgram.Instructions.Insert(Math.Min(_pageZeroBodyStart, _pageZeroProgram.Instructions.Count),
                 new GasmInstruction(GasmOp.Add, GasmEmitter.Work(_pageZeroTimeReg), GasmEmitter.Work(_pageZeroTimeReg), GasmEmitter.Special(4)));
         }
-        if (_frameUsed && _pageZeroProgram != null && _pageZeroTimeReg >= 0)
+        if (_frameUsed && _pageZeroProgram != null && _pageZeroFrameReg >= 0)
         {
             _pageZeroProgram.Instructions.Insert(Math.Min(_pageZeroBodyStart, _pageZeroProgram.Instructions.Count),
                 new GasmInstruction(GasmOp.Add, GasmEmitter.Work(_pageZeroFrameReg), GasmEmitter.Work(_pageZeroFrameReg), GasmEmitter.Const(1)));
         }
 
+    }
+
+    /// <summary>
+    /// Objects a statement may need a GASM connection for. The splitter uses this
+    /// before compiling the statement, because a page can overflow the connection
+    /// limit long before it reaches the instruction limit. The scan is deliberately
+    /// conservative: a local object variable is counted when it is named, and object
+    /// fields are resolved through the current scope.
+    /// </summary>
+    private HashSet<LevelNode> ObjectsIn(Stmt statement)
+    {
+        var nodes = new HashSet<LevelNode>();
+        ScanStmt(statement, nodes);
+        return nodes;
+    }
+
+    private void AddObjectName(string name, HashSet<LevelNode> nodes)
+    {
+        var v = Lookup(name);
+        if (v?.IsObject == true && v.ObjectNode != null) nodes.Add(v.ObjectNode);
+    }
+
+    private void ScanStmt(Stmt? statement, HashSet<LevelNode> nodes)
+    {
+        switch (statement)
+        {
+            case null: return;
+            case BlockStmt block:
+                foreach (var child in block.Statements) ScanStmt(child, nodes);
+                return;
+            case LocalDeclStmt local:
+                foreach (var (name, init, _, _) in local.Declarators)
+                {
+                    ScanExpr(init, nodes);
+                    if (Lookup(name)?.IsObject == true) AddObjectName(name, nodes);
+                }
+                return;
+            case ExprStmt expr: ScanExpr(expr.Expr, nodes); return;
+            case IfStmt ifs:
+                ScanExpr(ifs.Cond, nodes);
+                ScanStmt(ifs.Then, nodes);
+                ScanStmt(ifs.Else, nodes);
+                return;
+            case WhileStmt whiles:
+                ScanExpr(whiles.Cond, nodes);
+                ScanStmt(whiles.Body, nodes);
+                return;
+            case DoStmt doStmt:
+                ScanStmt(doStmt.Body, nodes);
+                ScanExpr(doStmt.Cond, nodes);
+                return;
+            case ForStmt forStmt:
+                ScanStmt(forStmt.Init, nodes);
+                ScanExpr(forStmt.Cond, nodes);
+                foreach (var inc in forStmt.Increment) ScanExpr(inc, nodes);
+                ScanStmt(forStmt.Body, nodes);
+                return;
+            case SwitchStmt switchStmt:
+                ScanExpr(switchStmt.Expr, nodes);
+                foreach (var c in switchStmt.Cases) foreach (var child in c.Statements) ScanStmt(child, nodes);
+                return;
+            case ForEachStmt forEach:
+                ScanExpr(forEach.Collection, nodes);
+                if (Lookup(forEach.Name)?.IsObject == true) AddObjectName(forEach.Name, nodes);
+                ScanStmt(forEach.Body, nodes);
+                return;
+            case TryStmt tryStmt:
+                ScanStmt(tryStmt.Body, nodes);
+                foreach (var c in tryStmt.Catches) ScanStmt(c.Body, nodes);
+                ScanStmt(tryStmt.Finally, nodes);
+                return;
+            case ThrowStmt throwStmt: ScanExpr(throwStmt.Expr, nodes); return;
+            case UsingStmt usingStmt:
+                ScanStmt(usingStmt.Declaration, nodes);
+                ScanExpr(usingStmt.Resource, nodes);
+                ScanStmt(usingStmt.Body, nodes);
+                return;
+            case LockStmt lockStmt:
+                ScanExpr(lockStmt.Lock, nodes);
+                ScanStmt(lockStmt.Body, nodes);
+                return;
+            case LabeledStmt labeled: ScanStmt(labeled.Inner, nodes); return;
+            case ReturnStmt ret: ScanExpr(ret.Expr, nodes); return;
+            case YieldStmt yield: ScanExpr(yield.Value, nodes); return;
+        }
+    }
+
+    private void ScanExpr(Expr? expression, HashSet<LevelNode> nodes)
+    {
+        switch (expression)
+        {
+            case null: return;
+            case NameExpr name:
+                AddObjectName(name.Name, nodes);
+                return;
+            case MemberExpr member:
+                ScanExpr(member.Target, nodes);
+                return;
+            case CallExpr call:
+                ScanExpr(call.Target, nodes);
+                foreach (var arg in call.Args) ScanExpr(arg, nodes);
+                return;
+            case BinaryExpr binary:
+                ScanExpr(binary.Left, nodes);
+                ScanExpr(binary.Right, nodes);
+                return;
+            case UnaryExpr unary: ScanExpr(unary.Operand, nodes); return;
+            case AssignmentExpr assign:
+                ScanExpr(assign.Target, nodes);
+                ScanExpr(assign.Value, nodes);
+                return;
+            case ConditionalExpr conditional:
+                ScanExpr(conditional.Cond, nodes);
+                ScanExpr(conditional.True, nodes);
+                ScanExpr(conditional.False, nodes);
+                return;
+            case CastExpr cast: ScanExpr(cast.Operand, nodes); return;
+            case AwaitExpr awaitExpr: ScanExpr(awaitExpr.Operand, nodes); return;
+            case ParenthesizedExpr paren: ScanExpr(paren.Inner, nodes); return;
+            case IndexExpr index:
+                ScanExpr(index.Target, nodes);
+                ScanExpr(index.Index, nodes);
+                return;
+            case InterpolatedStringExpr interpolated:
+                foreach (var part in interpolated.Parts) ScanExpr(part.Value, nodes);
+                return;
+            case NewExpr newExpr:
+                ScanExpr(newExpr.Size, nodes);
+                foreach (var arg in newExpr.Args) ScanExpr(arg, nodes);
+                foreach (var init in newExpr.Initializers) ScanExpr(init, nodes);
+                foreach (var (_, value) in newExpr.MemberInit) ScanExpr(value, nodes);
+                return;
+        }
     }
 
     private CValue MathConstant(MemberExpr m)

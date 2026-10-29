@@ -51,8 +51,26 @@ public static class LevelIO
             level.Nodes.Add(ReadNode(f.Bytes));
         level.RebuildParents();
         ResolveNodeReferences(level);
+        MarkParkedHelpers(level);
         level.EnsureNames();
         return level;
+    }
+
+    /// <summary>
+    /// GRAB's static-node message has no "hide model" field, so the tiny bus blocks a
+    /// split script parks far below the level come back as ordinary cubes when a
+    /// .level is reopened. Recognise that signature so the editor hides them again.
+    /// </summary>
+    private static void MarkParkedHelpers(GrabLevel level)
+    {
+        foreach (var n in level.AllNodes())
+        {
+            if (n.Kind != NodeKind.Static) continue;
+            if (n.Position.Y > -500f) continue;
+            if (n.Scale.X > 0.1f || n.Scale.Y > 0.1f || n.Scale.Z > 0.1f) continue;
+            n.HideModel = true;
+            n.Generated = true;
+        }
     }
 
     private static void ResolveNodeReferences(GrabLevel level)
