@@ -6,16 +6,6 @@ GRAB ENGINE reads and writes GRAB's real `.level` protobuf files, uses the game'
 SGM meshes and PNG textures, and compiles C# Code Blocks into genuine GASM bytecode and
 GASM object/register connections. Levels exported here load directly in the retail game.
 
-![GRAB ENGINE editor](docs/editor.png)
-
-![Level Library](screenshots/level-library.png)
-
-![Audio Studio](screenshots/audio-studio.png)
-
-![MP3 importer](screenshots/audio-mp3.png)
-
-![Text to speech](screenshots/audio-speech.png)
-
 ---
 
 ## Run it

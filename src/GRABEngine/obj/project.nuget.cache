@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "dgSpecHash": "EHfyyostfH0=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\gages\\Downloads\\GRAB ENGINE\\src\\GRABEngine\\GRABEngine.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\gages\\.nuget\\packages\\avalonedit\\6.3.1.120\\avalonedit.6.3.1.120.nupkg.sha512",
+    "C:\\Users\\gages\\.nuget\\packages\\naudio\\2.2.1\\naudio.2.2.1.nupkg.sha512",
+    "C:\\Users\\gages\\.nuget\\packages\\naudio.asio\\2.2.1\\naudio.asio.2.2.1.nupkg.sha512",
+    "C:\\Users\\gages\\.nuget\\packages\\naudio.core\\2.2.1\\naudio.core.2.2.1.nupkg.sha512",
+    "C:\\Users\\gages\\.nuget\\packages\\naudio.midi\\2.2.1\\naudio.midi.2.2.1.nupkg.sha512",
+    "C:\\Users\\gages\\.nuget\\packages\\naudio.wasapi\\2.2.1\\naudio.wasapi.2.2.1.nupkg.sha512",
+    "C:\\Users\\gages\\.nuget\\packages\\naudio.winforms\\2.2.1\\naudio.winforms.2.2.1.nupkg.sha512",
+    "C:\\Users\\gages\\.nuget\\packages\\naudio.winmm\\2.2.1\\naudio.winmm.2.2.1.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1603",
+      "level": "Warning",
+      "message": "GRABEngine depends on AvalonEdit (>= 6.3.1) but AvalonEdit 6.3.1 was not found. AvalonEdit 6.3.1.120 was resolved instead.",
+      "projectPath": "C:\\Users\\gages\\Downloads\\GRAB ENGINE\\src\\GRABEngine\\GRABEngine.csproj",
+      "warningLevel": 1,
+      "filePath": "C:\\Users\\gages\\Downloads\\GRAB ENGINE\\src\\GRABEngine\\GRABEngine.csproj",
+      "libraryId": "AvalonEdit",
+      "targetGraphs": [
+        "net10.0-windows"
+      ]
+    }
+  ]
+}
