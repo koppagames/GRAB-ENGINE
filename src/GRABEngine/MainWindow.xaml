@@ -1,0 +1,495 @@
+﻿<Window x:Class="GRABEngine.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:GrabEngine.Controls"
+        Title="GRAB ENGINE" Height="920" Width="1560" MinWidth="1100" MinHeight="680"
+        WindowStartupLocation="CenterScreen" WindowState="Maximized">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="24"/>
+        </Grid.RowDefinitions>
+
+        <Menu Grid.Row="0" Padding="2,0">
+            <MenuItem Header="_File">
+                <MenuItem Header="New Level" InputGestureText="Ctrl+N" Click="NewLevel_Click"/>
+                <MenuItem Header="Open Project..." InputGestureText="Ctrl+O" Click="OpenProject_Click"/>
+                <MenuItem Header="Save Project" InputGestureText="Ctrl+S" Click="SaveProject_Click"/>
+                <MenuItem Header="Save Project As..." Click="SaveProjectAs_Click"/>
+                <Separator/>
+                <MenuItem Header="Export .level..." InputGestureText="Ctrl+E" Click="ExportLevel_Click"/>
+                <MenuItem Header="Import .glb Model..." Click="ImportGlb_Click"/>
+                <MenuItem Header="Level Library..." Click="LevelLibrary_Click"/>
+                <MenuItem Header="Install to GRAB" Click="InstallLevel_Click"/>
+                <Separator/>
+                <MenuItem Header="Version History..." Click="VersionHistory_Click"/>
+                <MenuItem Header="Create Snapshot" Click="CreateSnapshot_Click"/>
+                <Separator/>
+                <MenuItem Header="Exit" Click="Exit_Click"/>
+            </MenuItem>
+            <MenuItem Header="_Edit">
+                <MenuItem x:Name="UndoMenuItem" Header="Undo" InputGestureText="Ctrl+Z" Click="Undo_Click" IsEnabled="False"/>
+                <MenuItem x:Name="RedoMenuItem" Header="Redo" InputGestureText="Ctrl+Y" Click="Redo_Click" IsEnabled="False"/>
+                <Separator/>
+                <MenuItem Header="Duplicate" InputGestureText="Ctrl+D" Click="Duplicate_Click"/>
+                <MenuItem Header="Delete" InputGestureText="Del" Click="Delete_Click"/>
+                <Separator/>
+                <MenuItem Header="Select All Objects" InputGestureText="Ctrl+Shift+A" Click="SelectAllObjects_Click"/>
+                <MenuItem Header="Transform">
+                    <MenuItem x:Name="LocalSpaceMenuItem" Header="Local Space" IsCheckable="True" Click="LocalSpace_Click"/>
+                    <MenuItem Header="Snap Selection to Grid" Click="SnapSelection_Click"/>
+                    <MenuItem Header="Set Symmetry Pivot to Selection" Click="SymmetryPivot_Click"/>
+                    <Separator/>
+                    <MenuItem Header="Align X">
+                        <MenuItem Header="Min" Tag="0,0" Click="AlignSelection_Click"/>
+                        <MenuItem Header="Center" Tag="0,1" Click="AlignSelection_Click"/>
+                        <MenuItem Header="Max" Tag="0,2" Click="AlignSelection_Click"/>
+                    </MenuItem>
+                    <MenuItem Header="Align Y">
+                        <MenuItem Header="Min" Tag="1,0" Click="AlignSelection_Click"/>
+                        <MenuItem Header="Center" Tag="1,1" Click="AlignSelection_Click"/>
+                        <MenuItem Header="Max" Tag="1,2" Click="AlignSelection_Click"/>
+                    </MenuItem>
+                    <MenuItem Header="Align Z">
+                        <MenuItem Header="Min" Tag="2,0" Click="AlignSelection_Click"/>
+                        <MenuItem Header="Center" Tag="2,1" Click="AlignSelection_Click"/>
+                        <MenuItem Header="Max" Tag="2,2" Click="AlignSelection_Click"/>
+                    </MenuItem>
+                    <MenuItem Header="Distribute">
+                        <MenuItem Header="Along X" Tag="0" Click="DistributeSelection_Click"/>
+                        <MenuItem Header="Along Y" Tag="1" Click="DistributeSelection_Click"/>
+                        <MenuItem Header="Along Z" Tag="2" Click="DistributeSelection_Click"/>
+                    </MenuItem>
+                    <MenuItem Header="Duplicate Array..." Click="ArrayDuplicate_Click"/>
+                    <MenuItem Header="Mirror Selection">
+                        <MenuItem Header="Mirror X in place" Tag="0,0" Click="MirrorSelection_Click"/>
+                        <MenuItem Header="Mirror X (duplicate)" Tag="0,1" Click="MirrorSelection_Click"/>
+                        <MenuItem Header="Mirror Z in place" Tag="2,0" Click="MirrorSelection_Click"/>
+                        <MenuItem Header="Mirror Z (duplicate)" Tag="2,1" Click="MirrorSelection_Click"/>
+                    </MenuItem>
+                </MenuItem>
+                <Separator/>
+                <MenuItem Header="Frame Scene" InputGestureText="F" Click="FrameAll_Click"/>
+            </MenuItem>
+            <MenuItem Header="_GameObject">
+                <MenuItem Header="Add GameObject or Component…" InputGestureText="Ctrl+A" Click="AddObjectMenu_Click"/>
+                <MenuItem Header="Add C# Script to Selection" Click="AddScriptComponent_Click"/>
+                <Separator/>
+                <MenuItem Header="Create Empty Group" Click="AddGroup_Click"/>
+                <Separator/>
+                <MenuItem Header="Cube" Tag="1000" Click="AddShape_Click"/>
+                <MenuItem Header="Sphere" Tag="1001" Click="AddShape_Click"/>
+                <MenuItem Header="Cylinder" Tag="1002" Click="AddShape_Click"/>
+                <MenuItem Header="Pyramid" Tag="1003" Click="AddShape_Click"/>
+                <MenuItem Header="Prism" Tag="1004" Click="AddShape_Click"/>
+                <MenuItem Header="Cone" Tag="1005" Click="AddShape_Click"/>
+                <MenuItem Header="Pyramid (Square Base)" Tag="1006" Click="AddShape_Click"/>
+            </MenuItem>
+            <MenuItem x:Name="PrefabMenu" Header="_Prefabs">
+                <MenuItem Header="Save Selection as Prefab..." Click="SavePrefab_Click"/>
+                <MenuItem Header="Create Variant from Selection..." Click="SavePrefabVariant_Click"/>
+                <Separator/>
+                <MenuItem x:Name="SpawnPrefabMenu" Header="Spawn Prefab"/>
+                <MenuItem x:Name="StampPrefabMenu" Header="Stamp Prefab"/>
+                <MenuItem Header="Stop Stamping" Click="StopPrefabStamp_Click"/>
+                <Separator/>
+                <MenuItem Header="Refresh Prefab List" Click="RefreshPrefabs_Click"/>
+                <MenuItem Header="Open Prefabs Folder" Click="OpenPrefabsFolder_Click"/>
+            </MenuItem>
+            <MenuItem Header="_Component">
+                <MenuItem Header="Code Block (C#)" Click="AddComponent_Click" Tag="GASM"/>
+                <MenuItem Header="Trigger" Click="AddComponent_Click" Tag="Trigger"/>
+                <MenuItem Header="Point Light" Click="AddComponent_Click" Tag="Light"/>
+                <MenuItem Header="Sign" Click="AddComponent_Click" Tag="Sign"/>
+                <MenuItem Header="Sound" Click="AddComponent_Click" Tag="Sound"/>
+                <MenuItem Header="Particle Emitter" Click="AddComponent_Click" Tag="ParticleEmitter"/>
+                <Separator/>
+                <MenuItem Header="Start Point" Click="AddComponent_Click" Tag="Start"/>
+                <MenuItem Header="Finish Point" Click="AddComponent_Click" Tag="Finish"/>
+                <MenuItem Header="Gravity Zone" Click="AddComponent_Click" Tag="Gravity"/>
+                <MenuItem Header="Crumbling Block" Click="AddComponent_Click" Tag="Crumbling"/>
+                <MenuItem Header="Lobby Terminal" Click="AddComponent_Click" Tag="LobbyTerminal"/>
+            </MenuItem>
+            <MenuItem Header="_Tools">
+                <MenuItem Header="Level Library..." Click="LevelLibrary_Click"/>
+                <MenuItem Header="Draw Structures..." InputGestureText="G" Click="BuildTool_Click"/>
+                <MenuItem Header="Terrain &amp; World Builder..." Click="Terrain_Click"/>
+                <MenuItem Header="Structure Studio (Advanced)..." Click="StructureStudio_Click"/>
+                <MenuItem Header="Build Validation..." Click="ValidateLevel_Click"/>
+                <MenuItem Header="Clear Validation Overlay" Click="ClearValidation_Click"/>
+                <MenuItem Header="Level Optimizer &amp; Budget..." Click="Optimizer_Click"/>
+                <MenuItem Header="Prefab &amp; Asset Palette..." Click="PrefabPalette_Click"/>
+                <MenuItem Header="Audio Studio..." Click="AudioStudio_Click"/>
+                <MenuItem Header="Text to Speech..." Click="TextToSpeech_Click"/>
+                <Separator/>
+                <MenuItem Header="Search Hierarchy" InputGestureText="Ctrl+F" Click="FocusHierarchySearch_Click"/>
+                <MenuItem Header="Manage Layers..." Click="ManageLayers_Click"/>
+            </MenuItem>
+            <MenuItem Header="_Window">
+                <MenuItem Header="Animation" Click="Animation_Click"/>
+                <MenuItem Header="Level &amp; Ambience" Click="Ambience_Click"/>
+                <MenuItem Header="C# Editor" Click="ShowCode_Click"/>
+                <MenuItem Header="GASM Output" Click="ShowGasm_Click"/>
+                <MenuItem Header="Problems" Click="ShowProblems_Click"/>
+                <MenuItem Header="Console" Click="ShowConsole_Click"/>
+            </MenuItem>
+            <MenuItem Header="_Help">
+                <MenuItem Header="C# Scripting Reference" Click="CSharpHelp_Click"/>
+                <MenuItem Header="GASM Reference" Click="GasmHelp_Click"/>
+                <MenuItem Header="About GRAB ENGINE" Click="About_Click"/>
+            </MenuItem>
+        </Menu>
+
+        <Border Grid.Row="1" Background="#FF252525" BorderBrush="#FF3A3A3A" BorderThickness="0,0,0,1" Padding="6,4">
+            <DockPanel LastChildFill="False">
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                    <Button x:Name="UndoButton" Content="↶" FontSize="15" Padding="7,1" Margin="0,0,2,0" Click="Undo_Click" ToolTip="Undo (Ctrl+Z)" IsEnabled="False"/>
+                    <Button x:Name="RedoButton" Content="↷" FontSize="15" Padding="7,1" Margin="0,0,7,0" Click="Redo_Click" ToolTip="Redo (Ctrl+Y or Ctrl+Shift+Z)" IsEnabled="False"/>
+                    <Border Width="1" Background="#FF3C3C3C" Margin="0,2,7,2"/>
+                    <ToggleButton x:Name="ToolSelect" Style="{StaticResource ToolButton}" Content="☰  Select" Tag="Select" Click="Tool_Click" ToolTip="Select (Q)"/>
+                    <ToggleButton x:Name="ToolMove" Style="{StaticResource ToolButton}" Content="✥  Move" Tag="Move" Click="Tool_Click" IsChecked="True" ToolTip="Move (W)"/>
+                    <ToggleButton x:Name="ToolRotate" Style="{StaticResource ToolButton}" Content="⟳  Rotate" Tag="Rotate" Click="Tool_Click" ToolTip="Rotate (E)"/>
+                    <ToggleButton x:Name="ToolScale" Style="{StaticResource ToolButton}" Content="⤢  Scale" Tag="Scale" Click="Tool_Click" ToolTip="Scale (R)"/>
+                    <ToggleButton x:Name="ToolBrush" Style="{StaticResource ToolButton}" Tag="Brush" Click="Tool_Click" ToolTip="Block brush — Fill, Replace, Erase, Line, Box, Sphere (B)">
+                        <TextBlock Text="▦  Brush" Foreground="#FFE8E8E8"/>
+                    </ToggleButton>
+                    <ToggleButton x:Name="ToolBuild" Style="{StaticResource ToolButton}" Tag="Build" Click="Tool_Click" ToolTip="Draw structures — drag a footprint or draw a custom polygon (G)">
+                        <TextBlock Text="✎  Draw" Foreground="#FFE8E8E8"/>
+                    </ToggleButton>
+                    <ToggleButton x:Name="ToolMeasure" Style="{StaticResource ToolButton}" Tag="Measure" Click="Tool_Click" ToolTip="Measure distances between two points (M)">
+                        <TextBlock Text="↔  Measure" Foreground="#FFE8E8E8"/>
+                    </ToggleButton>
+                    <ToggleButton x:Name="ToolPrefab" Style="{StaticResource ToolButton}" Tag="Prefab" Click="Tool_Click" ToolTip="Prefab stamp tool (P) — choose a prefab under Prefabs → Stamp Prefab">
+                        <TextBlock Text="◈  Prefab" Foreground="#FFE8E8E8"/>
+                    </ToggleButton>
+                    <Border Width="1" Background="#FF3C3C3C" Margin="8,2"/>
+                    <CheckBox x:Name="SnapCheck" Content="Snap" IsChecked="True" Margin="4,0,5,0" VerticalAlignment="Center" Click="Snap_Click" ToolTip="Grid snapping (hold Ctrl while dragging to bypass)"/>
+                    <CheckBox x:Name="LocalSpaceCheck" Content="Local" Margin="0,0,8,0" VerticalAlignment="Center" Click="LocalSpace_Click" ToolTip="Transform gizmo in object-local space"/>
+                    <ComboBox x:Name="SnapSizeCombo" Width="58" Height="23" SelectedIndex="2" Margin="0,0,6,0" VerticalAlignment="Center"
+                              SelectionChanged="SnapSize_Changed" ToolTip="Grid snap size">
+                        <ComboBoxItem Content="0.1"/>
+                        <ComboBoxItem Content="0.25"/>
+                        <ComboBoxItem Content="0.5"/>
+                        <ComboBoxItem Content="1.0"/>
+                        <ComboBoxItem Content="2.0"/>
+                    </ComboBox>
+                    <ComboBox x:Name="SnapModeCombo" Width="82" Height="23" SelectedIndex="1" Margin="0,0,10,0" VerticalAlignment="Center"
+                              SelectionChanged="SnapMode_Changed" ToolTip="Smart snap: grid, block face, edge or centre">
+                        <ComboBoxItem Content="Grid"/>
+                        <ComboBoxItem Content="Face"/>
+                        <ComboBoxItem Content="Edge"/>
+                        <ComboBoxItem Content="Center"/>
+                    </ComboBox>
+                    <Border Width="1" Background="#FF3C3C3C" Margin="0,2,8,2"/>
+                    <Button x:Name="PlayButton" Content="▶  Play" Background="#FF2E6B3E" BorderBrush="#FF3E8A52" Padding="12,3" Click="Play_Click" ToolTip="Compile and run (F5)"/>
+                    <Button x:Name="PauseButton" Content="❚❚" Padding="8,3" Margin="3,0" Click="Pause_Click" IsEnabled="False" ToolTip="Pause"/>
+                    <Button x:Name="StopButton" Content="■" Padding="8,3" Click="Stop_Click" IsEnabled="False" ToolTip="Stop"/>
+                    <Border x:Name="LiveBadge" Visibility="Collapsed" Background="#FF1E3A28" BorderBrush="#FF2E6B3E"
+                            BorderThickness="1" CornerRadius="3" Padding="7,2" Margin="7,0,0,0" VerticalAlignment="Center"
+                            ToolTip="Live edit: script changes compile and reload while Play mode is running">
+                        <TextBlock Text="● live edit" Foreground="#FF7FD8A0" FontSize="10.5"/>
+                    </Border>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                    <Button Content="Animation" Padding="10,3" Click="Animation_Click" ToolTip="Open the animation timeline (also Window → Animation)"/>
+                    <Button Content="Compile All" Padding="10,3" Margin="4,0,0,0" Click="CompileAll_Click" ToolTip="Compile every Code Block (F7)"/>
+                    <Button Content="Export .level" Padding="10,3" Margin="4,0" Style="{StaticResource AccentButton}" Click="ExportLevel_Click"/>
+                    <Button Content="Install to GRAB" Padding="10,3" Click="InstallLevel_Click"/>
+                </StackPanel>
+                <TextBlock x:Name="ToolbarFile" DockPanel.Dock="Right" Foreground="#FF8A8A8A" FontSize="11" VerticalAlignment="Center" Margin="0,0,14,0" Text="Untitled"/>
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="272" MinWidth="190"/>
+                <ColumnDefinition Width="4"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="4"/>
+                <ColumnDefinition Width="344" MinWidth="260"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Background="#FF2B2B2B" BorderBrush="#FF3C3C3C" BorderThickness="0,0,1,0">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" Background="#FF252525" BorderBrush="#FF3C3C3C" BorderThickness="0,0,0,1" Padding="7,5">
+                        <DockPanel>
+                            <Button x:Name="AddButton" DockPanel.Dock="Right" Content="+" Padding="8,0" FontSize="15" Click="AddButton_Click" ToolTip="Create object"/>
+                            <Button DockPanel.Dock="Right" Content="⧉" Padding="5,0" Margin="0,0,3,0" Click="Duplicate_Click" ToolTip="Duplicate"/>
+                            <Button DockPanel.Dock="Right" Content="🗑" Padding="5,0" Margin="0,0,3,0" Click="Delete_Click" ToolTip="Delete"/>
+                            <TextBlock Text="HIERARCHY" FontSize="10.5" FontWeight="SemiBold" Foreground="#FFD8D8D8" VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </Border>
+                    <Border DockPanel.Dock="Top" Background="#FF2B2B2B" BorderBrush="#FF3C3C3C" BorderThickness="0,0,0,1" Padding="6,4">
+                        <DockPanel>
+                            <TextBlock Text="⌕" Foreground="#FF8A8A8A" FontSize="14" VerticalAlignment="Center" Margin="1,0,5,0"/>
+                            <Button x:Name="HierarchyClearSearch" DockPanel.Dock="Right" Content="×" Padding="5,0" Margin="3,0,0,0"
+                                    Style="{StaticResource MiniButton}" Click="HierarchyClearSearch_Click" ToolTip="Clear hierarchy search"/>
+                            <TextBox x:Name="HierarchySearch" Height="23" ToolTip="Search names, kinds and materials"
+                                     TextChanged="HierarchySearch_Changed" VerticalContentAlignment="Center"/>
+                        </DockPanel>
+                    </Border>
+                    <Border DockPanel.Dock="Top" Background="#FF252525" BorderBrush="#FF3C3C3C" BorderThickness="0,0,0,1" Padding="6,4">
+                        <DockPanel>
+                            <Button x:Name="LayerManagerButton" DockPanel.Dock="Right" Content="Layers…" Padding="7,2"
+                                    Style="{StaticResource MiniButton}" Click="ManageLayers_Click" ToolTip="Create, hide, lock and assign editor layers"/>
+                            <TextBlock Text="Layer" Foreground="#FF8A8A8A" FontSize="10.5" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <ComboBox x:Name="LayerFilterCombo" Height="22" SelectionChanged="LayerFilter_Changed"
+                                      ToolTip="Show only objects on one editor layer"/>
+                        </DockPanel>
+                    </Border>
+                    <Border DockPanel.Dock="Bottom" Background="#FF252525" BorderBrush="#FF3C3C3C" BorderThickness="0,1,0,0" Padding="7,3">
+                        <TextBlock x:Name="HierarchyInfo" Text="0 objects" Foreground="#FF8A8A8A" FontSize="10.5"/>
+                    </Border>
+                    <TreeView x:Name="HierarchyTree" SelectedItemChanged="Hierarchy_Selected" AllowDrop="True"
+                              PreviewMouseLeftButtonDown="Hierarchy_PreviewMouseLeftButtonDown"
+                              PreviewMouseMove="Hierarchy_PreviewMouseMove"
+                              DragOver="Hierarchy_DragOver" Drop="Hierarchy_Drop"/>
+                </DockPanel>
+            </Border>
+            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext"/>
+
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="4"/>
+                    <RowDefinition x:Name="BottomRow" Height="292" MinHeight="90"/>
+                </Grid.RowDefinitions>
+                <controls:SceneView x:Name="Scene" Grid.Row="0"/>
+                <Border x:Name="BrushPalette" Grid.Row="0" Width="392" Visibility="Collapsed"
+                        HorizontalAlignment="Left" VerticalAlignment="Top" Margin="12,48,0,0"
+                        Background="#F22A2A2A" BorderBrush="#FF505050" BorderThickness="1" CornerRadius="4"
+                        Padding="10" Panel.ZIndex="20">
+                    <StackPanel>
+                        <DockPanel Margin="0,0,0,7">
+                            <Button x:Name="BrushClose" DockPanel.Dock="Right" Content="×" FontSize="15" Padding="6,0" Margin="0"
+                                    Style="{StaticResource MiniButton}" Click="BrushClose_Click" ToolTip="Close brush"/>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="▦" Foreground="#FF6FC8FF" FontSize="15" VerticalAlignment="Center"/>
+                                <TextBlock Text="BLOCK BRUSH" FontSize="11" FontWeight="SemiBold" Margin="7,0,0,0"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </DockPanel>
+                        <WrapPanel Margin="0,0,0,3">
+                            <ToggleButton x:Name="BrushFill" Style="{StaticResource ToolButton}" Tag="Fill"
+                                          Click="BrushMode_Click" ToolTip="Flood-fill the connected block island">
+                                <TextBlock Text="Fill" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                            <ToggleButton x:Name="BrushReplace" Style="{StaticResource ToolButton}" Tag="Replace"
+                                          Click="BrushMode_Click" ToolTip="Paint a new material onto blocks">
+                                <TextBlock Text="Replace" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                            <ToggleButton x:Name="BrushLine" Style="{StaticResource ToolButton}" Tag="Line"
+                                          Click="BrushMode_Click" ToolTip="Place a line of blocks">
+                                <TextBlock Text="Line" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                            <ToggleButton x:Name="BrushBox" Style="{StaticResource ToolButton}" Tag="Box"
+                                          Click="BrushMode_Click" ToolTip="Place a box of blocks">
+                                <TextBlock Text="Box" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                            <ToggleButton x:Name="BrushSphere" Style="{StaticResource ToolButton}" Tag="Sphere"
+                                          Click="BrushMode_Click" ToolTip="Place a sphere of blocks">
+                                <TextBlock Text="Sphere" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                            <ToggleButton x:Name="BrushErase" Style="{StaticResource ToolButton}" Tag="Erase"
+                                          Click="BrushMode_Click" ToolTip="Erase blocks under the brush">
+                                <TextBlock Text="Erase" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                        </WrapPanel>
+                        <Grid Margin="0,7,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="28"/>
+                                <RowDefinition Height="28"/>
+                                <RowDefinition Height="28"/>
+                                <RowDefinition Height="28"/>
+                                <RowDefinition Height="28"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="74"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Row="0" Text="Shape" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="BrushShapeCombo" Grid.Row="0" Grid.Column="1" Height="23"
+                                      SelectionChanged="BrushShape_Changed"/>
+                            <TextBlock Grid.Row="1" Text="Material" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="BrushMaterialCombo" Grid.Row="1" Grid.Column="1" Height="23"
+                                      SelectionChanged="BrushMaterial_Changed"/>
+                            <TextBlock Grid.Row="2" Text="Cell" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center"/>
+                            <Grid Grid.Row="2" Grid.Column="1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="68"/>
+                                </Grid.ColumnDefinitions>
+                                <ComboBox x:Name="BrushCellCombo" Height="23" SelectionChanged="BrushCell_Changed"/>
+                                <TextBlock Grid.Column="1" Text="Layers" Foreground="#FFB8B8B8" FontSize="11"
+                                           VerticalAlignment="Center" Margin="9,0,6,0"/>
+                                <ComboBox x:Name="BrushLayerCombo" Grid.Column="2" Height="23" SelectionChanged="BrushLayers_Changed"/>
+                            </Grid>
+                            <TextBlock Grid.Row="3" Text="Options" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center"/>
+                            <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <CheckBox x:Name="BrushHollowCheck" Content="Hollow" Click="BrushHollow_Click" Margin="0,0,8,0"
+                                          ToolTip="Leave only the outer shell of a Box or Sphere"/>
+                                <Border x:Name="BrushColorSwatch" Width="24" Height="18" CornerRadius="2"
+                                        BorderBrush="#FF606060" BorderThickness="1" Margin="0,0,5,0"/>
+                                <TextBox x:Name="BrushColorBox" Width="72" Height="22" ToolTip="Block color (Default Colored material)"/>
+                            </StackPanel>
+                            <TextBlock Grid.Row="4" Text="Mirror" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center"/>
+                            <Grid Grid.Row="4" Grid.Column="1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ComboBox x:Name="BrushSymmetryCombo" Height="23" SelectionChanged="BrushSymmetry_Changed"
+                                          ToolTip="Mirror each brush stroke across the symmetry pivot"/>
+                                <Button x:Name="BrushPivotButton" Grid.Column="1" Content="Pivot: selection" Margin="6,0,0,0"
+                                        Style="{StaticResource MiniButton}" Click="BrushPivot_Click"
+                                        ToolTip="Move the mirror pivot to the centre of the selection"/>
+                            </Grid>
+                        </Grid>
+                        <TextBlock x:Name="BrushHint" Text="Click a block to flood-fill its connected island with the selected material."
+                                   Foreground="#FF9A9A9A" FontSize="10.5" TextWrapping="Wrap" Margin="0,7,0,0"/>
+                        <TextBlock Text="LMB gesture  •  RMB orbit  •  Esc cancel  •  4096 cells max"
+                                   Foreground="#FF707070" FontSize="10" Margin="0,3,0,2"/>
+                        <TextBlock Text="Mirror repeats each stroke across the pivot on the chosen axes."
+                                   Foreground="#FF707070" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,2"/>
+                    </StackPanel>
+                </Border>
+                <Border x:Name="BuildPalette" Grid.Row="0" Width="430" Visibility="Collapsed"
+                        HorizontalAlignment="Left" VerticalAlignment="Top" Margin="12,48,0,0"
+                        Background="#F22A2A2A" BorderBrush="#FF505050" BorderThickness="1" CornerRadius="4"
+                        Padding="10" Panel.ZIndex="21">
+                    <StackPanel>
+                        <DockPanel Margin="0,0,0,7">
+                            <Button x:Name="BuildClose" DockPanel.Dock="Right" Content="×" FontSize="15" Padding="6,0" Margin="0"
+                                    Style="{StaticResource MiniButton}" Click="BuildClose_Click" ToolTip="Close draw tool"/>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="✎" Foreground="#FF6FC8FF" FontSize="15" VerticalAlignment="Center"/>
+                                <TextBlock Text="DRAW STRUCTURES" FontSize="11" FontWeight="SemiBold" Margin="7,0,0,0"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </DockPanel>
+                        <TextBlock Text="Drag a footprint in the scene and release. No coordinates to type."
+                                   Foreground="#FF9A9A9A" FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                        <WrapPanel Margin="0,0,0,5">
+                            <ToggleButton x:Name="BuildBox" Style="{StaticResource ToolButton}" Tag="Box" Click="BuildShape_Click">
+                                <TextBlock Text="Box" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                            <ToggleButton x:Name="BuildSphere" Style="{StaticResource ToolButton}" Tag="Sphere" Click="BuildShape_Click">
+                                <TextBlock Text="Sphere" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                            <ToggleButton x:Name="BuildCylinder" Style="{StaticResource ToolButton}" Tag="Cylinder" Click="BuildShape_Click">
+                                <TextBlock Text="Cylinder" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                            <ToggleButton x:Name="BuildCone" Style="{StaticResource ToolButton}" Tag="Cone" Click="BuildShape_Click">
+                                <TextBlock Text="Cone" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                            <ToggleButton x:Name="BuildStairs" Style="{StaticResource ToolButton}" Tag="Stairs" Click="BuildShape_Click">
+                                <TextBlock Text="Stairs" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                            <ToggleButton x:Name="BuildRamp" Style="{StaticResource ToolButton}" Tag="Ramp" Click="BuildShape_Click">
+                                <TextBlock Text="Ramp" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                            <ToggleButton x:Name="BuildPolygon" Style="{StaticResource ToolButton}" Tag="Polygon" Click="BuildShape_Click">
+                                <TextBlock Text="Custom Shape" Foreground="#FFE8E8E8"/>
+                            </ToggleButton>
+                        </WrapPanel>
+                        <Grid Margin="0,5,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="28"/>
+                                <RowDefinition Height="28"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="72"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Row="0" Text="Height" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center"/>
+                            <DockPanel Grid.Row="0" Grid.Column="1">
+                                <TextBlock x:Name="BuildHeightValue" DockPanel.Dock="Right" Text="3" Width="24"
+                                           Foreground="#FFD8D8D8" FontSize="11" VerticalAlignment="Center" TextAlignment="Right"/>
+                                <Slider x:Name="BuildHeightSlider" Minimum="1" Maximum="32" Value="3"
+                                        TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center"
+                                        ValueChanged="BuildHeight_Changed"/>
+                            </DockPanel>
+                            <TextBlock Grid.Row="1" Text="Options" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center"/>
+                            <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <CheckBox x:Name="BuildHollowCheck" Content="Hollow" Click="BuildHollow_Click" Margin="0,0,8,0"
+                                          ToolTip="Leave only the outer shell of a box, sphere or cylinder"/>
+                                <Border x:Name="BuildColorSwatch" Width="22" Height="17" CornerRadius="2"
+                                        BorderBrush="#FF606060" BorderThickness="1" Margin="0,0,5,0"/>
+                                <TextBox x:Name="BuildColorBox" Width="68" Height="22" ToolTip="Block colour"
+                                         LostFocus="BuildColor_Changed" KeyDown="BuildColor_KeyDown"/>
+                                <TextBlock Text="Material" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center" Margin="9,0,5,0"/>
+                                <ComboBox x:Name="BuildMaterialCombo" Width="135" Height="23" SelectionChanged="BuildMaterial_Changed"/>
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock x:Name="BuildHint" Text="LMB drag a footprint  •  [ / ] change height  •  Esc cancel  •  RMB orbit"
+                                   Foreground="#FF707070" FontSize="10" TextWrapping="Wrap" Margin="0,6,0,2"/>
+                        <TextBlock Text="Face snap is in the toolbar Snap menu. Face builds against the block you point at; Grid builds on the ground."
+                                   Foreground="#FF707070" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="Finish Custom Shape" Style="{StaticResource MiniButton}" Padding="8,3" Click="BuildFinishPolygon_Click"
+                                    ToolTip="Close a custom polygon and turn it into blocks (Enter also works)"/>
+                            <Button Content="Advanced Studio…" Style="{StaticResource MiniButton}" Padding="8,3" Margin="6,0,0,0"
+                                    Click="BuildAdvanced_Click"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+                <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext"/>
+                <TabControl x:Name="BottomTabs" Grid.Row="2" Background="#FF2B2B2B">
+                    <TabItem Header="C# Script">
+                        <controls:CodeEditorControl x:Name="CodeEditor"/>
+                    </TabItem>
+                    <TabItem Header="GASM">
+                        <TextBox x:Name="GasmView" IsReadOnly="True" AcceptsReturn="True" FontFamily="Cascadia Mono, Consolas"
+                                 FontSize="12" Background="#FF1A1A1A" Foreground="#FFCCCCCC" BorderThickness="0"
+                                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap"
+                                 Padding="6"/>
+                    </TabItem>
+                    <TabItem x:Name="AnimationTab" Header="Animation"/>
+                    <TabItem x:Name="ProblemsTab" Header="Problems">
+                        <ListView x:Name="ProblemsList" MouseDoubleClick="Problems_DoubleClick">
+                            <ListView.View>
+                                <GridView>
+                                    <GridViewColumn Header=" " Width="26" DisplayMemberBinding="{Binding Icon}"/>
+                                    <GridViewColumn Header="Line" Width="50" DisplayMemberBinding="{Binding Line}"/>
+                                    <GridViewColumn Header="Code" Width="70" DisplayMemberBinding="{Binding Code}"/>
+                                    <GridViewColumn Header="Message" Width="720" DisplayMemberBinding="{Binding Message}"/>
+                                </GridView>
+                            </ListView.View>
+                        </ListView>
+                    </TabItem>
+                    <TabItem Header="Console">
+                        <ListBox x:Name="ConsoleList" FontFamily="Cascadia Mono, Consolas" FontSize="11" Background="#FF1A1A1A"/>
+                    </TabItem>
+                    <TabItem x:Name="DebugTab" Header="Debug">
+                        <controls:DebuggerPanel x:Name="Debugger"/>
+                    </TabItem>
+                </TabControl>
+            </Grid>
+
+            <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext"/>
+            <Border Grid.Column="4" Background="#FF2B2B2B" BorderBrush="#FF3C3C3C" BorderThickness="1,0,0,0">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" Background="#FF252525" BorderBrush="#FF3C3C3C" BorderThickness="0,0,0,1" Padding="7,5">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Left" Text="INSPECTOR" FontSize="10.5" FontWeight="SemiBold" Foreground="#FFD8D8D8" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="InspectorPath" DockPanel.Dock="Right" Text="" Foreground="#FF7A7A7A" FontSize="10" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                        </DockPanel>
+                    </Border>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0">
+                        <StackPanel x:Name="InspectorHost" Margin="8,2,10,14"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+        </Grid>
+
+        <Border Grid.Row="3" Background="#FF007ACC" Padding="7,2">
+            <DockPanel>
+                <TextBlock x:Name="SelectionStatus" DockPanel.Dock="Right" Foreground="White" FontSize="11" Text="No selection"/>
+                <TextBlock x:Name="StatusText" Foreground="White" FontSize="11" Text="Ready"/>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>
