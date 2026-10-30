@@ -28,10 +28,11 @@ public partial class App : Application
             Shutdown();
             return;
         }
-        if (e.Args.Contains("--shot") || e.Args.Contains("--shot-animation") || e.Args.Contains("--shot-play") || e.Args.Contains("--shot-brush") || e.Args.Contains("--shot-build"))
+        if (e.Args.Contains("--shot") || e.Args.Contains("--shot-animation") || e.Args.Contains("--shot-play") || e.Args.Contains("--shot-brush") || e.Args.Contains("--shot-build") || e.Args.Contains("--shot-text"))
         {
             string shotFlag = e.Args.Contains("--shot-animation") ? "--shot-animation"
                 : e.Args.Contains("--shot-play") ? "--shot-play"
+                : e.Args.Contains("--shot-text") ? "--shot-text"
                 : e.Args.Contains("--shot-build") ? "--shot-build"
                 : e.Args.Contains("--shot-brush") ? "--shot-brush" : "--shot";
             var win = new MainWindow { Width = 1600, Height = 1000, WindowState = WindowState.Normal };
@@ -40,9 +41,10 @@ public partial class App : Application
             if (shotFlag == "--shot-play") win.StartPlayForScreenshot();
             if (shotFlag == "--shot-brush") win.ShowBrushForScreenshot();
             if (shotFlag == "--shot-build") win.ShowBuildForScreenshot();
+            if (shotFlag == "--shot-text") win.ShowTextForScreenshot();
             // Let the scene view animate for a moment so clouds, particles and the
             // play-mode camera are in their live state when the frame is captured.
-            var shotTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(shotFlag == "--shot-play" ? 2400 : shotFlag is "--shot-brush" or "--shot-build" ? 1600 : 1200) };
+            var shotTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(shotFlag == "--shot-play" ? 2400 : shotFlag is "--shot-brush" or "--shot-build" or "--shot-text" ? 1600 : 1200) };
             shotTimer.Tick += (_, _) =>
             {
                 shotTimer.Stop();
@@ -143,9 +145,14 @@ public partial class App : Application
                 "terrain" => new TerrainStudioWindow(owner, level),
                 "neural" => new NeuralLabWindow(owner),
                 "structure" => new StructureStudioWindow(owner, level),
+                "maze" or "maze-circle" => new MazeGeneratorWindow(owner, new Vec3(0, 0, 0)),
+                "text" => new TextToBlocksWindow(owner, new Vec3(0, 0, 0)),
+                "colour" => new ColorPickerWindow(new Col(0.35f, 0.62f, 0.9f)),
                 "history" => new VersionHistoryWindow(owner, null, level.Title),
                 _ => new ExportDialog(owner, level, Path.Combine(Path.GetTempPath(), "shot.level"))
             };
+            if (which == "maze-circle" && target is MazeGeneratorWindow mazeShot)
+                mazeShot.ShowCircleForScreenshot();
             target.Owner = owner;
             target.Show();
             var shotTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };

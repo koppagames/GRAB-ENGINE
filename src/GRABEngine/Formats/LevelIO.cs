@@ -199,6 +199,13 @@ public static class LevelIO
                 n.Scale = PbReader.Vec3(c, 4, Vec3.One);
                 n.Rotation = PbReader.Quat(c, 5);
                 n.Color1 = PbReader.Col(c, 6, new Col(0.72f, 0.72f, 0.72f, 1));
+                // GRAB stores "No Texture" as Color 1 = 99999999. Remember the flag so
+                // the colour field can show it and a re-export keeps the sentinel.
+                if (n.Color1.R > 1000f || n.Color1.G > 1000f || n.Color1.B > 1000f)
+                {
+                    n.NoTexture = true;
+                    n.Color1 = new Col(1, 1, 1, Math.Clamp(n.Color1.A, 0, 1));
+                }
                 n.IsNeon = PbReader.Bool(c, 7);
                 n.IsTransparent = PbReader.Bool(c, 8);
                 n.Color2 = PbReader.Col(c, 9, new Col(0.15f, 0.15f, 0.15f, 1));
@@ -517,7 +524,10 @@ public static class LevelIO
                     m.Vec3(3, n.Position);
                     m.Vec3(4, n.Scale);
                     m.Quat(5, n.Rotation);
-                    m.Color(6, n.Color1);
+                    if (n.NoTexture)
+                        m.Color(6, new Col(MaterialInfo.NoTextureColor, MaterialInfo.NoTextureColor, MaterialInfo.NoTextureColor, 1f));
+                    else
+                        m.Color(6, n.Color1);
                     m.Bool(7, n.IsNeon);
                     m.Bool(8, n.IsTransparent);
                     m.Color(9, n.Color2);

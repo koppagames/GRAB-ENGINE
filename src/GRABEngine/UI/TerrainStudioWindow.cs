@@ -191,7 +191,7 @@ public sealed class TerrainStudioWindow : Window
         settings.Children.Add(Theme.SectionHeader("PATH / ROAD"));
         settings.Children.Add(Theme.Hint("Pick the Paint path brush above, then drag on the heightmap. Right-drag erases path cells. Brush size is the road width; there are no start/end coordinates."));
         settings.Children.Add(Theme.Row("Material", _pathMaterial));
-        settings.Children.Add(Theme.Row("Colour", _pathColor));
+        settings.Children.Add(Theme.Row("Colour", ColorInputs.Field(_pathColor, c => _preview.SetPathColor(c))));
         var clearPath = Theme.Button("Clear Path", small: true);
         clearPath.Click += (_, _) =>
         {
@@ -209,10 +209,10 @@ public sealed class TerrainStudioWindow : Window
         settings.Children.Add(Theme.Row("Body", _bodyMaterial));
         settings.Children.Add(Theme.Row("Cliff", _cliffMaterial));
         settings.Children.Add(Theme.Row("Snow", _snowMaterial));
-        settings.Children.Add(Theme.Row("Top colour", _topColor));
-        settings.Children.Add(Theme.Row("Body colour", _bodyColor));
-        settings.Children.Add(Theme.Row("Cliff colour", _cliffColor));
-        settings.Children.Add(Theme.Row("Snow colour", _snowColor));
+        settings.Children.Add(Theme.Row("Top colour", ColorInputs.Field(_topColor)));
+        settings.Children.Add(Theme.Row("Body colour", ColorInputs.Field(_bodyColor)));
+        settings.Children.Add(Theme.Row("Cliff colour", ColorInputs.Field(_cliffColor)));
+        settings.Children.Add(Theme.Row("Snow colour", ColorInputs.Field(_snowColor)));
         settings.Children.Add(Theme.Hint("Colours apply to Default Colored. Materials with fixed textures ignore tint in GRAB, just like the Inspector."));
 
         settings.Children.Add(Theme.SectionHeader("BIOMES  ·  AUTO MATERIALS"));
@@ -224,8 +224,8 @@ public sealed class TerrainStudioWindow : Window
         settings.Children.Add(Theme.Row("Top material", _biomeTopMaterial));
         settings.Children.Add(Theme.Row("Body material", _biomeBodyMaterial));
         settings.Children.Add(Theme.Row("Cliff material", _biomeCliffMaterial));
-        settings.Children.Add(Theme.Row("Top colour", _biomeTopColor));
-        settings.Children.Add(Theme.Row("Body colour", _biomeBodyColor));
+        settings.Children.Add(Theme.Row("Top colour", ColorInputs.Field(_biomeTopColor)));
+        settings.Children.Add(Theme.Row("Body colour", ColorInputs.Field(_biomeBodyColor)));
         settings.Children.Add(Theme.Row("Min height", _biomeMinHeight));
         settings.Children.Add(Theme.Row("Max height", _biomeMaxHeight));
         settings.Children.Add(Theme.Row("Max slope", _biomeMaxSlope));
@@ -233,7 +233,7 @@ public sealed class TerrainStudioWindow : Window
         settings.Children.Add(Theme.SectionHeader("WATER & COASTLINE"));
         settings.Children.Add(_water);
         settings.Children.Add(Theme.Row("Water level Y", _waterLevel));
-        settings.Children.Add(Theme.Row("Water colour", _waterColor));
+        settings.Children.Add(Theme.Row("Water colour", ColorInputs.Field(_waterColor)));
         settings.Children.Add(Theme.Hint("Water is one passable transparent slab. The top block turns sandy within 0.75 m of the water line."));
 
         settings.Children.Add(Theme.SectionHeader("SCULPT HELPERS"));

@@ -157,6 +157,9 @@ public struct Col
 
     public string Hex => $"#{Ri:X2}{Gi:X2}{Bi:X2}";
 
+    /// <summary>#RRGGBB for opaque colours, #RRGGBBAA when the alpha is not 255.</summary>
+    public string HexAlpha => Ai == 255 ? Hex : Hex + Ai.ToString("X2");
+
     public static Col FromHex(string hex, Col fallback = default)
     {
         try

@@ -75,6 +75,25 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        ColourGradeMenuItem.IsChecked = EngineSettings.GameColourGrade;
+        // Every colour preview in the toolbars opens the picker and commits immediately.
+        ColorInputs.Attach(BrushColorSwatch, BrushColorBox, _ => ApplyBrushColor(),
+            () => Scene.BrushNoTexture,
+            v =>
+            {
+                Scene.BrushNoTexture = v;
+                if (BrushNoTextureCheck != null) BrushNoTextureCheck.IsChecked = v;
+                UpdateBrushColorSwatch();
+            });
+        ColorInputs.Attach(BuildColorSwatch, BuildColorBox, _ => ApplyBuildColor(),
+            () => Scene.BuildNoTexture,
+            v =>
+            {
+                Scene.BuildNoTexture = v;
+                if (BuildNoTextureCheck != null) BuildNoTextureCheck.IsChecked = v;
+                UpdateBuildColorSwatch();
+            });
+        ColorInputs.Attach(TerrainColorSwatch, TerrainColorBox, _ => ApplyTerrainColor());
         Scene.SelectionSetChanged += Scene_SelectionSetChanged;
         Scene.SceneModified += Scene_SceneModified;
         Scene.NodePlaced += Scene_NodePlaced;
@@ -109,7 +128,7 @@ public partial class MainWindow : Window
         _autosaveTimer.Tick += (_, _) => AutoSave();
         _autosaveTimer.Start();
         bool automation = Environment.GetCommandLineArgs().Any(a =>
-            a is "--shot" or "--shot-animation" or "--shot-window" or "--shot-project" or "--selftest" or "--shot-play" or "--shot-brush" or "--shot-build");
+            a is "--shot" or "--shot-animation" or "--shot-window" or "--shot-project" or "--selftest" or "--shot-play" or "--shot-brush" or "--shot-build" or "--shot-text");
         if (!automation) Loaded += (_, _) => CheckAutosaveRecovery();
         _animationPanel = new AnimationPanel(new AnimationWindowContext
         {
@@ -419,12 +438,59 @@ public partial class MainWindow : Window
             MarkDirty(null, "Build " + name);
             StatusText.Text = $"{name}: {added.Count} block(s) added";
             Log($"Built {name}: {added.Count} block(s)");
-        };
+        };        window.ShowDialog();
+    }
+
+    private void Maze_Click(object sender, RoutedEventArgs e)
+    {
+        if (_playing) StopPlay();
+        var window = new MazeGeneratorWindow(this, Scene.ViewTarget);
+        window.Built += plan => ApplyMaze(plan);
         window.ShowDialog();
     }
 
-    private void ValidateLevel_Click(object sender, RoutedEventArgs e)
+    /// <summary>Writes a generated maze into the level as one editable group.</summary>
+    private void ApplyMaze(MazePlan plan)
     {
+        var nodes = new List<LevelNode>(plan.Blocks);
+        nodes.AddRange(plan.Lights);
+        var added = Scene.AddStructure(nodes, "Maze");
+        var placed = new List<string>();
+        if (plan.Start != null) placed.Add(PlaceStartFinish(NodeKind.Start, plan.Start));
+        if (plan.Finish != null) placed.Add(PlaceStartFinish(NodeKind.Finish, plan.Finish));
+        BuildHierarchy();
+        var roots = Scene.TopLevelSelection();
+        if (roots.Count > 0) SelectNodes(roots);
+        Scene.Refresh();
+        MarkDirty(null, "Generate maze");
+        string moved = placed.Count == 0 ? "" : "  ·  " + string.Join(", ", placed);
+        StatusText.Text = $"Maze: {added.Count} object(s) added{moved}";
+        Log("Maze generated: " + plan.Summary + moved);
+    }
+
+    /// <summary>
+    /// Moves the level's existing Start/Finish onto the maze entrance and exit, or adds
+    /// them when the level has none yet. GRAB levels only want one of each, so the
+    /// generator never duplicates them.
+    /// </summary>
+    private string PlaceStartFinish(NodeKind kind, LevelNode source)
+    {
+        var existing = _level.AllNodes().FirstOrDefault(n => n.Kind == kind);
+        string label = NodeKindInfo.Display(kind);
+        if (existing == null)
+        {
+            source.LayerId = GrabLevel.DefaultLayerId;
+            _level.AddNode(source);
+            return $"added {label}";
+        }
+        existing.Position = source.Position;
+        existing.Rotation = source.Rotation;
+        existing.Radius = source.Radius;
+        return $"moved {label}";
+    }
+
+    private void ValidateLevel_Click(object sender, RoutedEventArgs e)
+{
         if (_playing) StopPlay();
         var window = new ValidationWindow(this, _level,
             node => SelectNode(node),
@@ -557,6 +623,16 @@ public partial class MainWindow : Window
                 MarkDirty("path-bake", "Baked path Code Block");
                 Log("Pathfinding: baked route into Code Block '" + block.DisplayName + "'");
                 StatusText.Text = "Path baked to Code Block — export the level to use it in GRAB";
+            },
+            rig =>
+            {
+                Scene.SetLevel(_level, frame: false);
+                BuildHierarchy();
+                SelectNode(rig);
+                RefreshInspector();
+                MarkDirty("path-rig", "Place pathfinding sensor rig");
+                Log($"Pathfinding: placed sensor rig '{rig.DisplayName}'");
+                StatusText.Text = "Sensor rig placed — Bake Agent compiles it into a Code Block";
             });
         _pathfindingWindow = window;
         window.Closed += (_, _) =>
@@ -598,6 +674,24 @@ public partial class MainWindow : Window
     }
 
     private void TextToSpeech_Click(object sender, RoutedEventArgs e) => OpenAudioStudio(2);
+
+    private void TextToBlocks_Click(object sender, RoutedEventArgs e)
+    {
+        if (_playing) StopPlay();
+        var window = new TextToBlocksWindow(this, Scene.ViewTarget);
+        window.Built += plan =>
+        {
+            var added = Scene.AddStructure(plan.Nodes, "Text");
+            BuildHierarchy();
+            var roots = Scene.TopLevelSelection();
+            if (roots.Count > 0) SelectNodes(roots);
+            Scene.Refresh();
+            MarkDirty(null, "Text to blocks");
+            StatusText.Text = plan.Summary;
+            Log("Text blocks placed: " + plan.Summary);
+        };
+        window.ShowDialog();
+    }
 
     private void OpenAudioStudio(int tab)
     {
@@ -2346,6 +2440,22 @@ public partial class MainWindow : Window
 
     private void FrameAll_Click(object sender, RoutedEventArgs e) => Scene.FrameAll();
 
+    /// <summary>
+    /// Toggles the display-only colour grade. The grade pulls saturated albedo a little
+    /// toward luma to match how GRAB's renderer tonemaps blocks in game; it never
+    /// changes a block's stored colour or the exported level.
+    /// </summary>
+    private void ColourGrade_Click(object sender, RoutedEventArgs e)
+    {
+        EngineSettings.GameColourGrade = ColourGradeMenuItem.IsChecked;
+        TextureLibrary.ClearCache();
+        SceneBuilder.ClearMaterialCache();
+        Scene.Refresh();
+        Log(EngineSettings.GameColourGrade
+            ? "View: matched to GRAB's in-game colour grade."
+            : "View: raw, ungraded block colours.");
+    }
+
     private void AddGroup_Click(object sender, RoutedEventArgs e)
     {
         if (_playing) return;
@@ -2600,6 +2710,7 @@ public partial class MainWindow : Window
             BuildHeightSlider.Value = 3;
             BuildHeightValue.Text = "3";
             BuildHollowCheck.IsChecked = false;
+            BuildNoTextureCheck.IsChecked = false;
             BuildFoundationCombo.SelectedIndex = 0;
             BuildFoundationDepth.Text = "4";
             BuildColorBox.Text = Scene.BuildColor.Hex;
@@ -2608,6 +2719,7 @@ public partial class MainWindow : Window
             Scene.BuildHeight = 3;
             Scene.BuildHollow = false;
             Scene.BuildMaterial = 8;
+            Scene.BuildNoTexture = false;
             Scene.BuildFoundation = TerrainFoundationMode.None;
             Scene.BuildFoundationDepth = 4;
             SyncBuildShapeButtons();
@@ -2662,6 +2774,13 @@ public partial class MainWindow : Window
         if (!_syncingBuildUi) Scene.BuildHollow = BuildHollowCheck.IsChecked == true;
     }
 
+    private void BuildNoTexture_Click(object sender, RoutedEventArgs e)
+    {
+        if (_syncingBuildUi) return;
+        Scene.BuildNoTexture = BuildNoTextureCheck.IsChecked == true;
+        UpdateBuildColorSwatch();
+    }
+
     private void BuildMaterial_Changed(object sender, SelectionChangedEventArgs e)
     {
         if (_syncingBuildUi || BuildMaterialCombo.SelectedIndex < 0) return;
@@ -2711,8 +2830,15 @@ public partial class MainWindow : Window
 
     private void UpdateBuildColorSwatch()
     {
+        if (Scene.BuildNoTexture)
+        {
+            BuildColorSwatch.Background = ColorInputs.NoTexturePreview;
+            BuildColorSwatch.ToolTip = "No texture (Color 1 = 99999999). Click for texture options.";
+            return;
+        }
         var c = Scene.BuildColor;
         BuildColorSwatch.Background = new SolidColorBrush(Color.FromRgb((byte)c.Ri, (byte)c.Gi, (byte)c.Bi));
+        BuildColorSwatch.ToolTip = "Click to open the colour picker and texture options";
     }
 
     private void BuildClose_Click(object sender, RoutedEventArgs e) => SelectEditorTool(EditorTool.Move);
@@ -2808,6 +2934,7 @@ public partial class MainWindow : Window
             BrushLayerCombo.ItemsSource = new[] { "1", "2", "3", "4", "6", "8", "12", "16" };
             BrushLayerCombo.SelectedIndex = 0;
             BrushHollowCheck.IsChecked = false;
+            BrushNoTextureCheck.IsChecked = false;
             BrushSymmetryCombo.ItemsSource = new[] { "None", "X", "Z", "Both" };
             BrushSymmetryCombo.SelectedIndex = 0;
             BrushColorBox.Text = Scene.BrushColor.Hex;
@@ -2820,6 +2947,7 @@ public partial class MainWindow : Window
             Scene.BrushLayers = 1;
             Scene.BrushHollow = false;
             Scene.BrushColor = new Col(0.72f, 0.72f, 0.72f, 1f);
+            Scene.BrushNoTexture = false;
             SyncBrushModeButtons(Scene.BrushMode);
             UpdateSymmetryPivotButton();
         }
@@ -2945,6 +3073,8 @@ public partial class MainWindow : Window
             if (layerIndex >= 0) BrushLayerCombo.SelectedIndex = layerIndex;
             BrushHollowCheck.IsChecked = entry.Hollow;
             Scene.BrushHollow = entry.Hollow;
+            BrushNoTextureCheck.IsChecked = false;
+            Scene.BrushNoTexture = false;
             bool colorable = MaterialInfo.IsColorable(entry.Material);
             BrushColorBox.IsEnabled = colorable;
             BrushColorSwatch.Opacity = colorable ? 1 : 0.35;
@@ -3047,6 +3177,13 @@ public partial class MainWindow : Window
         if (_syncingBrushUi) return;
         Scene.BrushHollow = BrushHollowCheck.IsChecked == true;
         UpdateBrushFavoriteButton();
+    }
+
+    private void BrushNoTexture_Click(object sender, RoutedEventArgs e)
+    {
+        if (_syncingBrushUi) return;
+        Scene.BrushNoTexture = BrushNoTextureCheck.IsChecked == true;
+        UpdateBrushColorSwatch();
     }
 
     private void BrushClose_Click(object sender, RoutedEventArgs e) => SelectEditorTool(EditorTool.Move);
@@ -3353,8 +3490,15 @@ public partial class MainWindow : Window
 
     private void UpdateBrushColorSwatch()
     {
+        if (Scene.BrushNoTexture)
+        {
+            BrushColorSwatch.Background = ColorInputs.NoTexturePreview;
+            BrushColorSwatch.ToolTip = "No texture (Color 1 = 99999999). Click for texture options.";
+            return;
+        }
         var c = Scene.BrushColor;
         BrushColorSwatch.Background = new SolidColorBrush(Color.FromRgb((byte)c.Ri, (byte)c.Gi, (byte)c.Bi));
+        BrushColorSwatch.ToolTip = "Click to open the colour picker and texture options";
     }
 
     private void Scene_BrushApplied(BlockBrushResult result)
@@ -3513,6 +3657,25 @@ public partial class MainWindow : Window
         Scene.Refresh();
         Scene.FrameAll();
         StatusText.Text = "Draw structures — drag a footprint in the scene";
+    }
+
+    /// <summary>Development aid for the --shot-text screenshot.</summary>
+    internal void ShowTextForScreenshot()
+    {
+        var plan = TextBlockBuilder.BuildPlan(new TextBlockSettings
+        {
+            Text = "GRAB", FontFamily = "Times New Roman", Height = 32, Detail = 3, Depth = 2,
+            BlockSize = 0.25f, Smoothing = TextSmoothness.VerySmooth,
+            Material = 8, Color = "#E8E8E8", Origin = new Vec3(0, 1f, 0)
+        });
+        if (plan.Ok && plan.Nodes.Count > 0)
+        {
+            Scene.AddStructure(plan.Nodes, "Text");
+            BuildHierarchy();
+            Scene.Refresh();
+            Scene.FrameAll();
+        }
+        StatusText.Text = plan.Ok ? plan.Summary : plan.Error;
     }
 
     /// <summary>Development aid for the --shot-animation screenshot.</summary>
@@ -4466,6 +4629,13 @@ public class LanguageTest : CodeBlock
             var brushSpherePlacement = brushScene.ApplyBrushForAutomation(new VoxelCell(20, 5, 20), new VoxelCell(21, 5, 20));
             Check("brush sphere mode places a solid ball", brushSpherePlacement.Count == 7,
                 $"{brushSpherePlacement.Count} blocks");
+            brushScene.BrushMode = BlockBrushMode.Line;
+            brushScene.BrushNoTexture = true;
+            var brushFlatPlacement = brushScene.ApplyBrushForAutomation(new VoxelCell(30, 1, 30), new VoxelCell(32, 1, 30));
+            Check("brush no-texture setting reaches placed blocks",
+                brushFlatPlacement.Count == 3 &&
+                brushTestLevel.AllNodes().Count(n => n.Kind == NodeKind.Static && n.NoTexture) == 3,
+                $"{brushFlatPlacement.Count} blocks, {brushTestLevel.AllNodes().Count(n => n.NoTexture)} flat");
             var mirroredLine = BlockBrushMath.Mirror(brushLine, BlockSymmetry.X, Vec3.Zero, 1);
             Check("brush mirror duplicates cells across X", mirroredLine.Cells.Count == 9 &&
                 mirroredLine.Cells.Contains(new VoxelCell(-4, 0, 0)) && mirroredLine.Cells.Contains(new VoxelCell(4, 0, 0)),
@@ -4492,6 +4662,217 @@ public class LanguageTest : CodeBlock
             var extruded = StructureBuilder.ExtrudePolygon(outline, structureSettings);
             Check("silhouette extrusion fills and extrudes an outline", extruded.Count > 12 &&
                 extruded.Max(n => n.Position.Y) > 0.5f, $"{extruded.Count} blocks");
+
+            // ---- maze generator ----
+            var mazeSettings = new MazeSettings
+            {
+                Columns = 14, Rows = 14, Cell = 3, WallHeight = 3, WallThickness = 0.4f,
+                Seed = 4242, StraightBias = 0.35f, WallMaterial = 8, Floor = true, Openings = true,
+                PlaceStartFinish = true
+            };
+            var maze = MazeBuilder.Build(mazeSettings);
+            Check("maze is fully connected", MazeBuilder.ReachableCells(maze) == maze.CellCount,
+                $"{MazeBuilder.ReachableCells(maze)}/{maze.CellCount} cells reachable");
+            Check("perfect maze is a spanning tree", MazeBuilder.PassageCount(maze) == maze.CellCount - 1,
+                $"{MazeBuilder.PassageCount(maze)} passage(s) for {maze.CellCount} cells");
+            Check("maze walls are merged into long runs",
+                maze.Blocks.Any(b => b.Scale.X > 3.5f || b.Scale.Z > 3.5f) && maze.Blocks.Count < maze.CellCount,
+                $"{maze.WallRuns} run(s), {maze.Blocks.Count} block(s)");
+            Check("maze has an entrance and an exit", !maze.AlongZ[0, 0] && !maze.AlongZ[maze.Columns, maze.Rows - 1],
+                $"openings at {(!maze.AlongZ[0, 0] ? "west" : "-")} and {(!maze.AlongZ[maze.Columns, maze.Rows - 1] ? "east" : "-")}");
+            var sameMaze = MazeBuilder.Build(mazeSettings);
+            Check("same seed rebuilds the same maze",
+                sameMaze.Blocks.Count == maze.Blocks.Count &&
+                sameMaze.Blocks.Zip(maze.Blocks).All(p => (p.First.Position - p.Second.Position).Length < 1e-4f),
+                $"{maze.Blocks.Count} block(s) reproduced");
+            var otherSeed = mazeSettings.Clone();
+            otherSeed.Seed = 999;
+            Check("a new seed changes the layout", MazeBuilder.Build(otherSeed).Blocks.Count != maze.Blocks.Count ||
+                !MazeBuilder.Build(otherSeed).Blocks.Zip(maze.Blocks).All(p => (p.First.Position - p.Second.Position).Length < 1e-4f),
+                "layout differs");
+            var braidedSettings = mazeSettings.Clone();
+            braidedSettings.Style = MazeStyle.Braided;
+            braidedSettings.LoopPercent = 100;
+            var braided = MazeBuilder.Build(braidedSettings);
+            Check("braided maze keeps loops and stays connected",
+                MazeBuilder.PassageCount(braided) > braided.CellCount - 1 &&
+                MazeBuilder.ReachableCells(braided) == braided.CellCount,
+                $"{MazeBuilder.PassageCount(braided)} passage(s)");
+            var roomSettings = mazeSettings.Clone();
+            roomSettings.Style = MazeStyle.Rooms;
+            roomSettings.Rooms = 4;
+            roomSettings.RoomSize = 3;
+            var roomsMaze = MazeBuilder.Build(roomSettings);
+            Check("room maze carves chambers and stays connected",
+                MazeBuilder.PassageCount(roomsMaze) > roomsMaze.CellCount - 1 &&
+                MazeBuilder.ReachableCells(roomsMaze) == roomsMaze.CellCount,
+                $"{MazeBuilder.PassageCount(roomsMaze)} passage(s)");
+            Check("maze start and finish sit in the entrance and exit cells",
+                maze.Start != null && maze.Finish != null &&
+                Math.Abs(maze.Start.Position.X - 1.5f) < 1e-3f && Math.Abs(maze.Start.Position.Z - 1.5f) < 1e-3f &&
+                Math.Abs(maze.Finish.Position.X - 40.5f) < 1e-3f && Math.Abs(maze.Finish.Position.Z - 40.5f) < 1e-3f,
+                $"start {maze.Start?.Position.X:0.#},{maze.Start?.Position.Z:0.#} finish {maze.Finish?.Position.X:0.#},{maze.Finish?.Position.Z:0.#}");
+
+            // Harder layouts: one corridor to the centre, a finish boxed into the middle,
+            // and concentric rings with the finish in the hub.
+            var spiralSettings = mazeSettings.Clone();
+            spiralSettings.Style = MazeStyle.Spiral;
+            var spiralMaze = MazeBuilder.Build(spiralSettings);
+            Check("spiral maze is one continuous corridor to the centre",
+                MazeBuilder.PassageCount(spiralMaze) == spiralMaze.CellCount - 1 &&
+                MazeBuilder.ReachableCells(spiralMaze) == spiralMaze.CellCount &&
+                spiralMaze.Solution.Count == spiralMaze.CellCount,
+                $"{spiralMaze.Solution.Count} cell route of {spiralMaze.CellCount}");
+
+            var centreSettings = mazeSettings.Clone();
+            centreSettings.FinishPlacement = MazeFinishPlacement.Centre;
+            var centreMaze = MazeBuilder.Build(centreSettings);
+            Check("centre finish is boxed in the middle of the maze",
+                centreMaze.FinishCell == 7 * 14 + 7 && centreMaze.FinishCell != centreMaze.StartCell &&
+                centreMaze.Solution.Count > 1,
+                $"finish cell {centreMaze.FinishCell}, route {centreMaze.Solution.Count}");
+
+            var draggedSettings = mazeSettings.Clone();
+            draggedSettings.StartCell = 20;
+            draggedSettings.FinishCell = 150;
+            var dragged = MazeBuilder.Build(draggedSettings);
+            Check("dragged endpoints build on their cells",
+                dragged.StartCell == 20 && dragged.FinishCell == 150 &&
+                dragged.Start != null && dragged.Finish != null &&
+                Math.Abs(dragged.Start.Position.X - 19.5f) < 1e-3f &&
+                Math.Abs(dragged.Start.Position.Z - 4.5f) < 1e-3f,
+                $"start {dragged.Start?.Position.X:0.#},{dragged.Start?.Position.Z:0.#}");
+            var (dragX, dragZ) = dragged.Centre(20);
+            Check("preview hit-testing maps a point back to its cell",
+                dragged.CellAt(dragX, dragZ) == 20, $"cell {dragged.CellAt(dragX, dragZ)}");
+
+            var circleSettings = new MazeSettings
+            {
+                Shape = MazeShape.Circle, Rings = 4, Sectors = 16, Cell = 2, WallHeight = 2.5f,
+                Seed = 77, Floor = true, Openings = true, PlaceStartFinish = true
+            };
+            var circleMaze = MazeBuilder.Build(circleSettings);
+            Check("circle maze is fully connected",
+                MazeBuilder.ReachableCells(circleMaze) == circleMaze.CellCount && circleMaze.CellCount == 65,
+                $"{MazeBuilder.ReachableCells(circleMaze)}/{circleMaze.CellCount} cells");
+            Check("circle maze starts on the outer ring and finishes in the hub",
+                circleMaze.StartCell == 3 * 16 && circleMaze.FinishCell == 64 &&
+                circleMaze.Start != null && circleMaze.Finish != null &&
+                Math.Abs(circleMaze.Finish.Position.X) < 1e-3f && Math.Abs(circleMaze.Finish.Position.Z) < 1e-3f,
+                $"start cell {circleMaze.StartCell}, finish cell {circleMaze.FinishCell}");
+            Check("circle maze has walls and route geometry",
+                circleMaze.Blocks.Count > 50 && circleMaze.PreviewWalls.Count > 50 && circleMaze.Solution.Count > 1,
+                $"{circleMaze.Blocks.Count} block(s), {circleMaze.PreviewWalls.Count} wall segment(s)");
+            var (ringX, ringZ) = circleMaze.Centre(10);
+            Check("circle preview hit-testing maps a point back to its cell",
+                circleMaze.CellAt(ringX, ringZ) == 10, $"cell {circleMaze.CellAt(ringX, ringZ)}");
+
+            var circleSpiralSettings = circleSettings.Clone();
+            circleSpiralSettings.Style = MazeStyle.Spiral;
+            var circleSpiral = MazeBuilder.Build(circleSpiralSettings);
+            Check("circle spiral is one winding corridor",
+                MazeBuilder.PassageCount(circleSpiral) == circleSpiral.CellCount - 1 &&
+                MazeBuilder.ReachableCells(circleSpiral) == circleSpiral.CellCount,
+                $"{MazeBuilder.PassageCount(circleSpiral)} passage(s) for {circleSpiral.CellCount} cells");
+            // The generated walls must survive a .level round trip like any other block.
+            var mazeLevel = GrabLevel.CreateBlank();
+            var mazeGroup = new LevelNode { Kind = NodeKind.Group, Name = "Maze", EditorLabel = "structure" };
+            mazeLevel.AddNode(mazeGroup);
+            foreach (var wall in maze.Blocks)
+            {
+                mazeGroup.Children.Add(wall);
+                wall.RebuildParents(mazeGroup);
+            }
+            mazeLevel.EnsureNames();
+            var mazeJson = ProjectIO.Serialize(mazeLevel);
+            var mazeBack = ProjectIO.Deserialize(mazeJson);
+            Check("maze blocks round trip through the project format",
+                mazeBack.AllNodes().Count(n => n.Kind == NodeKind.Static) == maze.Blocks.Count,
+                $"{mazeBack.AllNodes().Count(n => n.Kind == NodeKind.Static)} block(s) restored");
+
+            // ---- text to blocks ----
+            var textSettings = new TextBlockSettings { Text = "GRAB", Height = 16, Detail = 2, Depth = 2 };
+            var textPlan = TextBlockBuilder.BuildPlan(textSettings);
+            var textMask = textPlan.Mask;
+            Check("text to blocks rasterizes a mask", textPlan.Ok && textMask != null && textMask.Width > 4,
+                textPlan.Ok ? $"{textMask?.Width} × {textMask?.Height} cells" : textPlan.Error);
+            var baseMaskPlan = TextBlockBuilder.BuildPlan(new TextBlockSettings
+            {
+                Text = "GRAB", Height = 16, Detail = 2, Depth = 1, SmoothEdges = false
+            });
+            Check("text mask honours the requested height", baseMaskPlan.Mask?.Height == 16,
+                $"{baseMaskPlan.Mask?.Height} row(s)");
+            int textFilled = 0;
+            for (int y = 0; y < (textMask?.Height ?? 0); y++)
+                for (int x = 0; x < (textMask?.Width ?? 0); x++)
+                    if (textMask![x, y]) textFilled++;
+            Check("text mask has real glyph coverage", textFilled > 20 && textFilled < (textMask?.Width ?? 1) * (textMask?.Height ?? 1),
+                $"{textFilled} filled cell(s)");
+            Check("text runs are merged into long blocks", textPlan.Nodes.Count > 0 && textPlan.Nodes.Count < textPlan.Voxels &&
+                textPlan.Nodes.Any(n => n.Scale.X > 0.5f),
+                $"{textPlan.Nodes.Count} block(s) for {textPlan.Voxels} voxel(s)");
+            Check("standing text sits on its build point", textPlan.Nodes.Count > 0 &&
+                textPlan.Nodes.Min(n => n.Position.Y - n.Scale.Y * 0.5f) > -0.001f &&
+                textPlan.Nodes.Max(n => n.Position.Y) > 2f,
+                $"base {textPlan.Nodes.Min(n => n.Position.Y - n.Scale.Y * 0.5f):0.###}, top {textPlan.Nodes.Max(n => n.Position.Y):0.###}");
+            var outlineSettings = new TextBlockSettings { Text = "GRAB", Height = 16, Detail = 2, Depth = 2, Fill = TextFillMode.Outline };
+            var outlinePlan = TextBlockBuilder.BuildPlan(outlineSettings);
+            Check("outline text uses fewer voxels than solid", outlinePlan.Ok && outlinePlan.Nodes.Count > 0 &&
+                outlinePlan.Voxels < textPlan.Voxels,
+                $"{outlinePlan.Voxels} vs {textPlan.Voxels} voxel(s), {outlinePlan.Nodes.Count} vs {textPlan.Nodes.Count} block(s)");
+            var lyingSettings = new TextBlockSettings { Text = "GRAB", Height = 16, Detail = 2, Depth = 2, Plane = TextPlane.Lying, BlockSize = 0.25f };
+            var lyingPlan = TextBlockBuilder.BuildPlan(lyingSettings);
+            float lyingSpanY = lyingPlan.Nodes.Count == 0 ? 0f : lyingPlan.Nodes.Max(n => n.Position.Y) - lyingPlan.Nodes.Min(n => n.Position.Y);
+            Check("lying text is flat on the ground", lyingPlan.Ok && lyingSpanY < 1f,
+                $"Y span {lyingSpanY:0.###}");
+
+            // Smoothing refines the grid; angled bars are the optional experimental pass.
+            var smoothPlan = TextBlockBuilder.BuildPlan(new TextBlockSettings { Text = "A", Height = 20, Detail = 2, Depth = 2, AngledEdges = true });
+            Check("text smoothing adds angled edge blocks", smoothPlan.Ok && smoothPlan.EdgeBars > 0 &&
+                smoothPlan.Shapes.Count == smoothPlan.Nodes.Count,
+                smoothPlan.Ok ? $"{smoothPlan.EdgeBars} bar(s), {smoothPlan.Shapes.Count} shape(s)" : smoothPlan.Error);
+            Check("text smoothing refines the block grid", smoothPlan.Ok && smoothPlan.SmoothScale == 2 && smoothPlan.Rows == 40,
+                smoothPlan.Ok ? $"{smoothPlan.SmoothScale}×, {smoothPlan.Rows} row(s)" : smoothPlan.Error);
+            Check("text smoothing keeps the world size", smoothPlan.Ok &&
+                Math.Abs(smoothPlan.Rows * 0.125f - 20 * 0.25f) < 0.01f,
+                smoothPlan.Ok ? $"{smoothPlan.Rows * 0.125f:0.###} m tall" : smoothPlan.Error);
+            Check("smoothed text uses rotated blocks", smoothPlan.Nodes.Any(n => Math.Abs(n.Rotation.ToEulerDegrees().Z) > 6f),
+                smoothPlan.Nodes.Count == 0 ? "no blocks" :
+                    $"{smoothPlan.Nodes.Count(n => Math.Abs(n.Rotation.ToEulerDegrees().Z) > 6f)} rotated of {smoothPlan.Nodes.Count}");
+            var defaultSmoothPlan = TextBlockBuilder.BuildPlan(new TextBlockSettings { Text = "A", Height = 20, Detail = 2, Depth = 2 });
+            Check("smoothing uses the fine grid without angled bars by default",
+                defaultSmoothPlan.Ok && defaultSmoothPlan.SmoothScale == 2 && defaultSmoothPlan.EdgeBars == 0,
+                defaultSmoothPlan.Ok ? $"{defaultSmoothPlan.SmoothScale}×, {defaultSmoothPlan.EdgeBars} bar(s)" : defaultSmoothPlan.Error);
+            var ultraPlan = TextBlockBuilder.BuildPlan(new TextBlockSettings
+            {
+                Text = "A", Height = 20, Detail = 2, Depth = 2,
+                Smoothing = TextSmoothness.VerySmooth, AngledEdges = true
+            });
+            Check("text smoothing supports a 3× block grid", ultraPlan.Ok && ultraPlan.SmoothScale == 3 &&
+                ultraPlan.Rows == 60 && ultraPlan.EdgeBars > 0,
+                ultraPlan.Ok ? $"{ultraPlan.SmoothScale}×, {ultraPlan.Rows} row(s), {ultraPlan.EdgeBars} bar(s)" : ultraPlan.Error);
+            var maxHeightPlan = TextBlockBuilder.BuildPlan(new TextBlockSettings
+            {
+                Text = "A", Height = 96, Detail = 2, Depth = 1, Smoothing = TextSmoothness.VerySmooth
+            });
+            Check("max height still reaches the 3× grid", maxHeightPlan.Ok &&
+                maxHeightPlan.SmoothScale == 3 && maxHeightPlan.Rows == 288,
+                maxHeightPlan.Ok ? $"{maxHeightPlan.SmoothScale}×, {maxHeightPlan.Rows} row(s)" : maxHeightPlan.Error);
+            var plainPlan = TextBlockBuilder.BuildPlan(new TextBlockSettings { Text = "A", Height = 20, Detail = 2, Depth = 2, SmoothEdges = false });
+            Check("text smoothing can be turned off", plainPlan.Ok && plainPlan.EdgeBars == 0 && plainPlan.SmoothScale == 1,
+                $"{plainPlan.EdgeBars} bar(s), {plainPlan.SmoothScale}× grid");
+            var stemPlan = TextBlockBuilder.BuildPlan(new TextBlockSettings { Text = "I", Height = 20, Detail = 2, Depth = 1, SmoothEdges = false });
+            Check("text fill merges vertical stems into tall boxes", stemPlan.Ok && stemPlan.Nodes.Any(n => n.Scale.Y > 1.2f),
+                stemPlan.Ok ? $"{stemPlan.Nodes.Count} block(s)" : stemPlan.Error);
+            var badFont = TextBlockBuilder.BuildPlan(new TextBlockSettings { Text = "x", FontFile = "C:\\missing-font.ttf" });
+            Check("text reports a missing font file", !badFont.Ok && badFont.Error.Contains("Font file not found"), badFont.Error);
+            string arialPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), "arial.ttf");
+            if (File.Exists(arialPath))
+            {
+                var customFontPlan = TextBlockBuilder.BuildPlan(new TextBlockSettings { Text = "Hi", Height = 12, FontFile = arialPath });
+                Check("custom font files rasterize", customFontPlan.Ok && customFontPlan.Nodes.Count > 0,
+                    customFontPlan.Ok ? $"{customFontPlan.FontName}: {customFontPlan.Nodes.Count} block(s)" : customFontPlan.Error);
+            }
 
             // ---- terrain erosion brush and multi-point road ----
             var erodeHeights = new float[9, 9];
@@ -4678,6 +5059,11 @@ public class LanguageTest : CodeBlock
             var drawnStairs = drawScene.DrawShapeForAutomation(new VoxelCell(3, 0, 0), new VoxelCell(6, 0, 0), BuildShape.Stairs, 4);
             Check("draw tool builds stairs from a dragged footprint", drawnStairs.Created && drawnStairs.Count > 6,
                 $"{drawnStairs.Count} blocks");
+            drawScene.BuildNoTexture = true;
+            var drawnFlat = drawScene.DrawShapeForAutomation(new VoxelCell(10, 0, 10), new VoxelCell(11, 0, 11), BuildShape.Box, 1);
+            Check("draw no-texture setting reaches placed blocks",
+                drawnFlat.Count == 4 && drawLevel.AllNodes().Count(n => n.Kind == NodeKind.Static && n.NoTexture) == 4,
+                $"{drawnFlat.Count} blocks, {drawLevel.AllNodes().Count(n => n.NoTexture)} flat");
 
             var eraseLevel = new GrabLevel();
             LevelNode EraseBlock(VoxelCell cell)
@@ -5419,6 +5805,175 @@ public class ParamsTest : CodeBlock
             Check("exported live nav keeps its extended GASM", liveBlock?.ImportedProgram?.Instructions.Count > GrabLimits.MaxInstructions,
                 $"{liveBlock?.ImportedProgram?.Instructions.Count ?? 0} instructions");
 
+            // ---- exported sensor rigs: whisker ring and navmesh surface ----
+            static GrabLevel SensorLevel(string finderName, string targetName, out LevelNode finder, out LevelNode target)
+            {
+                var level = new GrabLevel { Title = "Sensor Rig" };
+                level.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "Rig Floor", Position = new Vec3(0, -0.5f, 0), Scale = new Vec3(20, 1, 14), Material = 8 });
+                // A wall that blocks the straight line but leaves a gap at z > 5.
+                level.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "Rig Wall", Position = new Vec3(0, 1, 2), Scale = new Vec3(1, 2, 6), Material = 8 });
+                finder = new LevelNode { Kind = NodeKind.Static, Name = finderName, Position = new Vec3(-6, 0.5f, 4), Scale = Vec3.One, Material = 8 };
+                target = new LevelNode { Kind = NodeKind.Static, Name = targetName, Position = new Vec3(6, 0.5f, 4), Scale = Vec3.One, Material = 8 };
+                level.AddNode(finder);
+                level.AddNode(target);
+                return level;
+            }
+
+            var whiskerLevel = SensorLevel("Whisker Finder", "Whisker Target", out var whiskerFinder, out var whiskerTarget);
+            var whiskerSettings = new PathfindingSettings
+            {
+                CellSize = 0.5f, AgentRadius = 0.35f, AgentHeight = 1.8f, Speed = 5f,
+                SensorMode = PathSensorMode.Whiskers, WhiskerDirections = 8, WhiskerRadius = 1.5f
+            };
+            var whiskerPath = Pathfinder.Find(whiskerLevel, whiskerSettings, whiskerFinder, whiskerTarget);
+            var whiskerRig = PathSensorRig.Build(whiskerLevel, whiskerSettings, whiskerFinder, whiskerTarget, whiskerPath);
+            Check("whisker rig places a ring of probe triggers around the finder",
+                whiskerRig.Success && whiskerRig.Count == 8 && whiskerRig.Nodes.All(n => n.Kind == NodeKind.Trigger),
+                whiskerRig.Message);
+            var whiskerBake = PathfindingExporter.BakeSensors(whiskerLevel, whiskerSettings, whiskerFinder, whiskerTarget, whiskerPath);
+            if (!whiskerBake.Success)
+                try { File.WriteAllText(Path.Combine(Path.GetTempPath(), "grabengine_whiskers.cs"), whiskerBake.Source); } catch { }
+            Check("whisker nav bakes a compiled Code Block", whiskerBake.Success && whiskerBake.Block?.Compiled?.Success == true,
+                whiskerBake.Message.Replace("\n", " | "));
+            var whiskerPlay = new PlaySession(whiskerLevel);
+            for (int i = 0; i < 900; i++) whiskerPlay.Step(1f / 60f);
+            Check("whisker agent rounds the wall and reaches the target",
+                (whiskerFinder.WorldPosition - whiskerTarget.WorldPosition).Length < 1.6f,
+                $"finder {whiskerFinder.WorldPosition} · target {whiskerTarget.WorldPosition}");
+            // Whiskers alone only sense a metre or two: the ring is paired with the same
+            // baked route graph, so it has to cross the level when the target moves there.
+            var whiskerChase = string.Empty;
+            bool whiskerChased = true;
+            foreach (var spot in new[] { new Vec3(-6, 0.5f, -4), new Vec3(5, 0.5f, -4), new Vec3(-5, 0.5f, 5) })
+            {
+                whiskerTarget.Position = spot;
+                for (int i = 0; i < 300; i++) whiskerPlay.Step(1f / 60f);
+                float gap = (whiskerFinder.WorldPosition - whiskerTarget.WorldPosition).Length;
+                whiskerChase += $" ({spot.X:0},{spot.Z:0})→{gap:0.0} m";
+                if (gap > 2.4f) whiskerChased = false;
+            }
+            Check("whisker agent follows a target moved anywhere on the ground", whiskerChased,
+                whiskerChase.Trim());
+
+            // A finder that starts overlapping geometry used to be pinned forever: every
+            // stepped position and every slide tested as blocked, so it never moved.
+            var pinnedLevel = new GrabLevel { Title = "Pinned Whisker" };
+            pinnedLevel.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "Pin Floor", Position = new Vec3(0, -0.5f, 0), Scale = new Vec3(20, 1, 14), Material = 8 });
+            pinnedLevel.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "Pin Wall", Position = new Vec3(0, 1, 0), Scale = new Vec3(1, 2, 12), Material = 8 });
+            var pinFinder = new LevelNode { Kind = NodeKind.Static, Name = "Pin Finder", Position = new Vec3(0.75f, 0.5f, -3), Scale = Vec3.One, Material = 8 };
+            var pinTarget = new LevelNode { Kind = NodeKind.Static, Name = "Pin Target", Position = new Vec3(-6, 0.5f, -3), Scale = Vec3.One, Material = 8 };
+            pinnedLevel.AddNode(pinFinder);
+            pinnedLevel.AddNode(pinTarget);
+            var pinSettings = new PathfindingSettings
+            {
+                CellSize = 0.5f, AgentRadius = 0.45f, AgentHeight = 1.8f, Speed = 5f,
+                SensorMode = PathSensorMode.Whiskers, WhiskerDirections = 8, WhiskerRadius = 1.5f
+            };
+            PathSensorRig.Build(pinnedLevel, pinSettings, pinFinder, pinTarget, null);
+            var pinBake = PathfindingExporter.BakeSensors(pinnedLevel, pinSettings, pinFinder, pinTarget,
+                Pathfinder.Find(pinnedLevel, pinSettings, pinFinder, pinTarget));
+            var pinPlay = new PlaySession(pinnedLevel);
+            for (int i = 0; i < 600; i++) pinPlay.Step(1f / 60f);
+            Check("whisker agent escapes an overlapping start instead of locking up",
+                pinBake.Success && (pinFinder.WorldPosition - pinTarget.WorldPosition).Length < 1.6f,
+                $"finder {pinFinder.WorldPosition} · target {pinTarget.WorldPosition}");
+
+            // A group finder keeps its visible blocks as children; those children must not
+            // be treated as walls around the group's own origin.
+            var groupLevel = new GrabLevel { Title = "Group Whisker" };
+            groupLevel.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "Grp Floor", Position = new Vec3(0, -0.5f, 0), Scale = new Vec3(20, 1, 14), Material = 8 });
+            var groupFinder = new LevelNode { Kind = NodeKind.Group, Name = "Grp Finder", Position = new Vec3(-6, 0.5f, 3) };
+            var groupBody = new LevelNode { Kind = NodeKind.Static, Name = "Grp Body", Scale = Vec3.One, Material = 8 };
+            groupFinder.Children.Add(groupBody);
+            groupBody.RebuildParents(groupFinder);
+            var groupTarget = new LevelNode { Kind = NodeKind.Static, Name = "Grp Target", Position = new Vec3(6, 0.5f, 3), Scale = Vec3.One, Material = 8 };
+            groupLevel.AddNode(groupFinder);
+            groupLevel.AddNode(groupTarget);
+            var groupSettings = new PathfindingSettings
+            {
+                CellSize = 0.5f, AgentRadius = 0.35f, AgentHeight = 1.8f, Speed = 5f,
+                SensorMode = PathSensorMode.Whiskers, WhiskerDirections = 8, WhiskerRadius = 1.5f
+            };
+            PathSensorRig.Build(groupLevel, groupSettings, groupFinder, groupTarget, null);
+            var groupBake = PathfindingExporter.BakeSensors(groupLevel, groupSettings, groupFinder, groupTarget,
+                Pathfinder.Find(groupLevel, groupSettings, groupFinder, groupTarget));
+            var groupPlay = new PlaySession(groupLevel);
+            for (int i = 0; i < 600; i++) groupPlay.Step(1f / 60f);
+            Check("group finder moves without its own children blocking it",
+                groupBake.Success && (groupFinder.WorldPosition - groupTarget.WorldPosition).Length < 1.6f,
+                $"finder {groupFinder.WorldPosition} · target {groupTarget.WorldPosition}");
+
+            var nvLevel = SensorLevel("NV Finder", "NV Target", out var nvFinder, out var nvTarget);
+            var nvSettings = new PathfindingSettings
+            {
+                CellSize = 0.5f, AgentRadius = 0.35f, AgentHeight = 1.8f, Speed = 5f,
+                SensorMode = PathSensorMode.NavMesh, NavMeshDetail = 1f, NavMeshArea = 16f, NavMeshMaxTriggers = 400
+            };
+            var nvPath = Pathfinder.Find(nvLevel, nvSettings, nvFinder, nvTarget);
+            var nvRig = PathSensorRig.Build(nvLevel, nvSettings, nvFinder, nvTarget, nvPath);
+            float tileSpanX = nvRig.Nodes.Count == 0 ? 0 : nvRig.Nodes.Max(n => n.WorldPosition.X) - nvRig.Nodes.Min(n => n.WorldPosition.X);
+            float tileSpanZ = nvRig.Nodes.Count == 0 ? 0 : nvRig.Nodes.Max(n => n.WorldPosition.Z) - nvRig.Nodes.Min(n => n.WorldPosition.Z);
+            Check("navmesh rig covers the walkable ground, not just the route",
+                nvRig.Success && tileSpanX > 16f && tileSpanZ > 10f &&
+                nvRig.Nodes.All(n => n.Kind == NodeKind.Trigger && n.EditorLabel == PathSensorRig.NavMeshLabel),
+                $"{nvRig.Message} span {tileSpanX:0.#} x {tileSpanZ:0.#} m");
+            var nvBake = PathfindingExporter.BakeSensors(nvLevel, nvSettings, nvFinder, nvTarget, nvPath);
+            if (!nvBake.Success)
+                try { File.WriteAllText(Path.Combine(Path.GetTempPath(), "grabengine_navmesh.cs"), nvBake.Source); } catch { }
+            Check("navmesh bakes a compiled Code Block", nvBake.Success && nvBake.Block?.Compiled?.Success == true,
+                nvBake.Message.Replace("\n", " | "));
+            var nvPlay = new PlaySession(nvLevel);
+            for (int i = 0; i < 900; i++) nvPlay.Step(1f / 60f);
+            Check("navmesh agent follows the surface through the gap",
+                (nvFinder.WorldPosition - nvTarget.WorldPosition).Length < 1.6f,
+                $"finder {nvFinder.WorldPosition} · target {nvTarget.WorldPosition}");
+            // A moving target is the point of the surface: the baked chain must be dropped
+            // as soon as it no longer leads toward the target's live position.
+            nvTarget.Position = new Vec3(6, 0.5f, -4);
+            for (int i = 0; i < 900; i++) nvPlay.Step(1f / 60f);
+            Check("navmesh agent follows a target that moved to a new spot",
+                (nvFinder.WorldPosition - nvTarget.WorldPosition).Length < 1.8f,
+                $"finder {nvFinder.WorldPosition} · target {nvTarget.WorldPosition}");
+            nvTarget.Position = new Vec3(-2, 0.5f, -4);
+            for (int i = 0; i < 900; i++) nvPlay.Step(1f / 60f);
+            Check("navmesh agent re-routes to a target moved behind the wall",
+                (nvFinder.WorldPosition - nvTarget.WorldPosition).Length < 2.2f,
+                $"finder {nvFinder.WorldPosition} · target {nvTarget.WorldPosition}");
+            // A target that keeps moving is the whole point of the baked next-hop table:
+            // the old frozen route fell apart as soon as the target left it.
+            var chaseSpots = new[]
+            {
+                new Vec3(6, 0.5f, 4), new Vec3(-6, 0.5f, -4), new Vec3(5, 0.5f, -4), new Vec3(-5, 0.5f, 5)
+            };
+            var chaseTrace = string.Empty;
+            bool chased = true;
+            foreach (var spot in chaseSpots)
+            {
+                nvTarget.Position = spot;
+                for (int i = 0; i < 300; i++) nvPlay.Step(1f / 60f);
+                float gap = (nvFinder.WorldPosition - nvTarget.WorldPosition).Length;
+                chaseTrace += $" ({spot.X:0},{spot.Z:0})→{gap:0.0} m";
+                if (gap > 2.4f) chased = false;
+            }
+            Check("navmesh agent keeps chasing a target that keeps moving", chased, chaseTrace.Trim());
+            // The whole point is that it leaves the editor: the baked table has to survive
+            // a real .level round-trip, not just live in the editor's own objects.
+            var nvRoundTrip = LevelIO.Read(LevelIO.Write(nvLevel));
+            var nvExported = nvRoundTrip.AllNodes().FirstOrDefault(n => n.Kind == NodeKind.GASM);
+            Check("exported navmesh .level keeps the baked route graph",
+                nvExported?.ImportedProgram != null &&
+                nvExported.ImportedProgram.Instructions.Count > GrabLimits.MaxInstructions,
+                $"{nvExported?.ImportedProgram?.Instructions.Count ?? 0} instructions");
+            // Re-place twice from the same state: the second rig must replace the first,
+            // not stack on top of it (tile count can legitimately change with the level).
+            PathSensorRig.Build(nvLevel, nvSettings, nvFinder, nvTarget, nvPath);
+            int nvTiles = nvLevel.AllNodes().Count(n => n.EditorLabel == PathSensorRig.NavMeshLabel);
+            PathSensorRig.Build(nvLevel, nvSettings, nvFinder, nvTarget, nvPath);
+            Check("placing a rig again replaces the previous one",
+                nvLevel.AllNodes().Count(n => n.EditorLabel == PathSensorRig.NavMeshLabel) == nvTiles &&
+                nvLevel.AllNodes().Count(n => n.EditorLabel == PathSensorRig.GroupLabel) == 1,
+                $"{nvTiles} tile(s) before, {nvLevel.AllNodes().Count(n => n.EditorLabel == PathSensorRig.NavMeshLabel)} after");
+
             // Diagnostic: does a plain Z write move a static block in the editor VM?
             var zLevel = new GrabLevel { Title = "Z Write" };
             var zMover = new LevelNode { Kind = NodeKind.Static, Name = "Z Mover", Position = new Vec3(0, 0.5f, 0), Scale = Vec3.One, Material = 8 };
@@ -6045,8 +6600,14 @@ public class ZMove : CodeBlock
             var iceRaw = TextureLibrary.RawTexture("ice");
             var rawPx = new byte[4];
             iceRaw.CopyPixels(new Int32Rect(iceRaw.PixelWidth / 2, iceRaw.PixelHeight / 2, 1, 1), rawPx, 4, 0);
-            Check("fixed materials ignore the paint colour", Math.Abs(icePx[0] - rawPx[0]) < 4 && Math.Abs(icePx[1] - rawPx[1]) < 4 && Math.Abs(icePx[2] - rawPx[2]) < 4,
-                $"ice {icePx[2]},{icePx[1]},{icePx[0]} vs texture {rawPx[2]},{rawPx[1]},{rawPx[0]}");
+            // Fixed textures must ignore the paint colour. The viewport now applies the
+            // game colour grade on top, so compare with the graded texture and check
+            // that a red paint did not leak into the ice.
+            var (gradeR, gradeG, gradeB) = TextureLibrary.GradePixel(rawPx[2], rawPx[1], rawPx[0]);
+            Check("fixed materials ignore the paint colour",
+                Math.Abs(icePx[0] - gradeB) < 4 && Math.Abs(icePx[1] - gradeG) < 4 && Math.Abs(icePx[2] - gradeR) < 4 &&
+                icePx[2] < 80,
+                $"ice {icePx[2]},{icePx[1]},{icePx[0]} vs graded texture {gradeR},{gradeG},{gradeB}");
 
             var lightLevel = new GrabLevel();
             lightLevel.Nodes.Add(new LevelNode
@@ -6064,6 +6625,14 @@ public class ZMove : CodeBlock
             var farFloorMesh = SceneBuilder.BlockMesh(bigBlock, new[] { farLight });
             Check("large faces are tessellated near lights", litFloorMesh.Positions.Count > 1000 && farFloorMesh.Positions.Count < 100,
                 $"near={litFloorMesh.Positions.Count} far={farFloorMesh.Positions.Count}");
+            // The picker is used by every colour field; its HSV/alpha round trip has to
+            // survive the conversion so a picked colour lands back on the same hex.
+            var pickedColour = ColorPickerWindow.FromHsv(210, 0.5, 0.8, 128);
+            ColorPickerWindow.ToHsv(pickedColour, out double pickedHue, out double pickedSat, out double pickedVal);
+            Check("colour picker round-trips HSV and alpha",
+                Math.Abs(pickedHue - 210) < 0.5 && Math.Abs(pickedSat - 0.5) < 0.01 &&
+                Math.Abs(pickedVal - 0.8) < 0.01 && pickedColour.Ai == 128 && pickedColour.HexAlpha.Length == 9,
+                $"{pickedColour.HexAlpha} hsv {pickedHue:0.#},{pickedSat:0.##},{pickedVal:0.##}");
             Check("C# reference bundled", File.Exists(Path.Combine(AppContext.BaseDirectory, "CSharpReference.md")));
             Check("SGM meshes bundled", File.Exists(Path.Combine(AppContext.BaseDirectory, "Assets", "Models", "cube.sgm")) && File.Exists(Path.Combine(AppContext.BaseDirectory, "Assets", "Models", "sphere.sgm")));
             Check("textures bundled", File.Exists(Path.Combine(AppContext.BaseDirectory, "Assets", "Textures", "wood.png")) && File.Exists(Path.Combine(AppContext.BaseDirectory, "Assets", "Textures", "grid.png")));
@@ -6491,6 +7060,29 @@ public class ZMove : CodeBlock
                 NeuralLayout.WeightIndex(new[] { 3, 2, 3 }, 1, 1, 1) ==
                 NeuralLayout.BiasIndex(new[] { 3, 2, 3 }, 1, 1) - 1,
                 NeuralLayout.WeightIndex(new[] { 3, 2, 3 }, 1, 1, 1).ToString());
+
+            // ---- "No Texture" blocks ----
+            var noTexLevel = GrabLevel.CreateDefault();
+            var noTexNode = noTexLevel.AllNodes().First(n => n.Kind == NodeKind.Static);
+            var normalNode = noTexLevel.AllNodes().Last(n => n.Kind == NodeKind.Static);
+            noTexNode.NoTexture = true;
+            var noTexBytes = LevelIO.Write(noTexLevel);
+            var sentinelBytes = BitConverter.GetBytes(MaterialInfo.NoTextureColor);
+            bool sentinelWritten = false;
+            for (int i = 0; i + 4 <= noTexBytes.Length && !sentinelWritten; i++)
+                sentinelWritten = noTexBytes[i] == sentinelBytes[0] && noTexBytes[i + 1] == sentinelBytes[1] &&
+                                  noTexBytes[i + 2] == sentinelBytes[2] && noTexBytes[i + 3] == sentinelBytes[3];
+            var noTexRoundTrip = LevelIO.Read(noTexBytes);
+            LevelNode ByPosition(LevelNode wanted) => noTexRoundTrip.AllNodes().First(n =>
+                n.Kind == NodeKind.Static &&
+                Math.Abs(n.Position.X - wanted.Position.X) < 0.001f &&
+                Math.Abs(n.Position.Y - wanted.Position.Y) < 0.001f &&
+                Math.Abs(n.Position.Z - wanted.Position.Z) < 0.001f);
+            var noTexBack = ByPosition(noTexNode);
+            var normalBack = ByPosition(normalNode);
+            Check("no-texture block survives .level export",
+                noTexBack.NoTexture && noTexBack.Color1.R <= 1f && !normalBack.NoTexture && sentinelWritten,
+                $"noTexture={noTexBack.NoTexture}, color1={noTexBack.Color1.R:0.###}, normal={normalBack.NoTexture}, sentinel={sentinelWritten}");
         }
         catch (Exception ex)
         {

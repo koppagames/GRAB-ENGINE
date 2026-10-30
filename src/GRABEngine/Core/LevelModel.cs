@@ -77,6 +77,13 @@ public static class MaterialInfo
     public static string Texture(int id) => All.FirstOrDefault(x => x.Id == id).Texture ?? "default";
 
     /// <summary>
+    /// GRAB interprets this Color 1 value as "no texture": the block is drawn as a
+    /// flat, untextured surface instead of sampling the material texture. It is the
+    /// same trick the retail editor uses when you tick "No Texture" on a block.
+    /// </summary>
+    public const float NoTextureColor = 99999999f;
+
+    /// <summary>
     /// Only GRAB's "Default Colored" material mixes Color1 into the texture. Every
     /// other material (ice, lava, wood, snow, ...) samples its own fixed texture and
     /// ignores the paint colour, so the editor must not offer a tint that the game
@@ -261,6 +268,8 @@ public class LevelNode
     public int Shape { get; set; } = ShapeInfo.Cube;
     public int Material { get; set; } = 8;
     public Col Color1 { get; set; } = new(0.72f, 0.72f, 0.72f, 1f);
+    /// <summary>Exports Color 1 as the 99999999 sentinel so GRAB draws no texture.</summary>
+    public bool NoTexture { get; set; }
     public Col Color2 { get; set; } = new(0.15f, 0.15f, 0.15f, 1f);
     public Vec3 GradientDirection { get; set; } = new(0, 1, 0);
     // GRAB's block inspector has a Rendering dropdown: Default, Specularity, Neon, ...

@@ -7,6 +7,22 @@ using GrabEngine.Code;
 
 namespace GrabEngine.Core;
 
+/// <summary>
+/// How the baked agent senses the level in the exported .level. GRAB triggers can only
+/// report the player's hands/head/feet/grapple/held block, so they cannot report walls;
+/// the rig's trigger positions are instead compiled into the generated program as probe
+/// points. What you place is what the exported agent actually uses.
+/// </summary>
+public enum PathSensorMode
+{
+    /// <summary>Direct probing of the watched wall objects (the original live planner).</summary>
+    LiveWalls,
+    /// <summary>A ring of probe triggers around the finder: 8-way collision sensing.</summary>
+    Whiskers,
+    /// <summary>A trigger surface over walkable ground, baked into a route chain.</summary>
+    NavMesh
+}
+
 /// <summary>How an agent is allowed to traverse the voxel level.</summary>
 public enum PathfindingTraversal
 {
@@ -66,6 +82,27 @@ public sealed class PathfindingSettings
     /// watches in the scene view.</summary>
     public bool ShowNavMesh { get; set; }
 
+    // ---- exported sensor rig ----
+    /// <summary>Which sensing model the baked agent uses. See <see cref="PathSensorMode"/>.</summary>
+    public PathSensorMode SensorMode { get; set; } = PathSensorMode.LiveWalls;
+    /// <summary>Probe triggers placed around the finder (4, 8 or 12).</summary>
+    public int WhiskerDirections { get; set; } = 8;
+    /// <summary>Outer probe distance in metres; the near probe is placed at 45% of it.</summary>
+    public float WhiskerRadius { get; set; } = 1.8f;
+    /// <summary>NavMesh rig spacing in metres. Smaller detail means more triggers and a
+    /// finer baked route, at the cost of more objects.</summary>
+    public float NavMeshDetail { get; set; } = 1.25f;
+    /// <summary>How far from the finder the navmesh surface covers walkable ground (m).</summary>
+    public float NavMeshArea { get; set; } = 30f;
+    /// <summary>Maximum trigger markers a navmesh rig may place.</summary>
+    public int NavMeshMaxTriggers { get; set; } = 500;
+    /// <summary>Route nodes baked into the exported agent. The runtime looks up the next
+    /// node for the live target, so this is the resolution of the shipped navigation graph.</summary>
+    public int NavMeshNodes { get; set; } = 18;
+    /// <summary>Longest straight hop between two route nodes (m). Longer hops mean fewer
+    /// nodes and a straighter route, but more chance of clipping a corner.</summary>
+    public float NavMeshLinkRange { get; set; } = 24f;
+
     public PathfindingSettings Clone() => (PathfindingSettings)MemberwiseClone();
 
     public void Clamp()
@@ -87,6 +124,18 @@ public sealed class PathfindingSettings
         MaxCells = Math.Clamp(MaxCells, 20_000, 8_000_000);
         WallHugPenalty = Math.Clamp(WallHugPenalty, 0f, 1f);
         BlockingObjects = Math.Clamp(BlockingObjects, 1, 96);
+        WhiskerDirections = WhiskerDirections switch
+        {
+            <= 4 => 4,
+            <= 8 => 8,
+            _ => 12
+        };
+        WhiskerRadius = Math.Clamp(WhiskerRadius, 0.4f, 8f);
+        NavMeshDetail = Math.Clamp(NavMeshDetail, 0.35f, 6f);
+        NavMeshArea = Math.Clamp(NavMeshArea, 2f, 120f);
+        NavMeshMaxTriggers = Math.Clamp(NavMeshMaxTriggers, 8, 1200);
+        NavMeshNodes = Math.Clamp(NavMeshNodes, 4, 48);
+        NavMeshLinkRange = Math.Clamp(NavMeshLinkRange, 4f, 80f);
     }
 }
 

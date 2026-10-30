@@ -70,7 +70,7 @@ public sealed class LayerManagerWindow : Window
         var side = new StackPanel();
         side.Children.Add(Theme.SectionHeader("LAYER PROPERTIES"));
         side.Children.Add(Theme.Row("Name", _name));
-        side.Children.Add(Theme.Row("Colour", _color));
+        side.Children.Add(Theme.Row("Colour", ColorInputs.Field(_color)));
         _color.ToolTip = "#RRGGBB";
         side.Children.Add(_visible);
         side.Children.Add(_locked);

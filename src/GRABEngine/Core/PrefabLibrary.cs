@@ -222,7 +222,7 @@ public static class PrefabLibrary
 
     private static readonly string[] ComparedProperties =
     {
-        "Position", "Rotation", "Scale", "Material", "Color1", "Color2", "Name", "Text",
+        "Position", "Rotation", "Scale", "Material", "Color1", "Color2", "NoTexture", "Name", "Text",
         "SignScale", "LightColor", "LightIntensity", "LightRange", "SoundVolume",
         "ParticlesPerSecond", "Shape", "StartActive"
     };
@@ -264,6 +264,7 @@ public static class PrefabLibrary
             "Material" => (node.Material.ToString(), template.Material.ToString()),
             "Color1" => (node.Color1.Hex, template.Color1.Hex),
             "Color2" => (node.Color2.Hex, template.Color2.Hex),
+            "NoTexture" => (node.NoTexture.ToString(), template.NoTexture.ToString()),
             "Name" => (node.Name, template.Name),
             "Text" => (node.Text ?? "", template.Text ?? ""),
             "SignScale" => (node.SignScale.ToString("0.###"), template.SignScale.ToString("0.###")),
@@ -296,6 +297,7 @@ public static class PrefabLibrary
             case "Material": node.Material = template.Material; break;
             case "Color1": node.Color1 = template.Color1; break;
             case "Color2": node.Color2 = template.Color2; break;
+            case "NoTexture": node.NoTexture = template.NoTexture; break;
             case "Name": node.Name = template.Name; break;
             case "Text": node.Text = template.Text; break;
             case "SignScale": node.SignScale = template.SignScale; break;
@@ -358,6 +360,7 @@ public static class PrefabLibrary
         to.Material = from.Material;
         to.Color1 = from.Color1;
         to.Color2 = from.Color2;
+        to.NoTexture = from.NoTexture;
         to.Shape = from.Shape;
         to.Text = from.Text;
         to.SignScale = from.SignScale;

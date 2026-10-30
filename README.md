@@ -45,13 +45,19 @@ dotnet publish src\GRABEngine -c Release -o app
 
 * 3D viewport with grid, sky, stars, clouds, sun and ambient lighting matching the level's
   ambience settings. Block faces are tessellated where a point/spot light reaches them, so
-  lights fall off across a surface instead of lighting a whole block evenly.
+  lights fall off across a surface instead of lighting a whole block evenly. Blocks are
+  displayed through a small **in-game colour grade** (View → Match in-game colour grade, on by
+  default) because GRAB tonemaps every albedo and fog flattens it slightly; the toggle shows
+  the raw albedo when you need to inspect a texture. It is display-only and never changes the
+  block's stored colour or the exported level.
 
 * Real GRAB shapes: cube, sphere, cylinder, pyramid, prism, cone, square-base pyramid.
 
 * Real GRAB materials: Default, Grabbable, Ice, Lava, Wood, Grapplable, Grapplable Lava,
   Grabbable Crumbling, Default Colored, Bouncing, Snow, Trigger. Only Default Colored is
-  paintable, matching the game; every other material uses its fixed texture colour.
+  paintable, matching the game; every other material uses its fixed texture colour. A block of
+  any material can also be switched to **No texture (flat)**: this exports Color 1 as
+  `99999999`, the same sentinel the retail editor uses, and GRAB draws the block untextured.
 
 * Move / Rotate / Scale gizmos with Local/Global space, grid snapping, mouse orbit/pan/zoom,
   frame-selection, align min/centre/max and even distribution on X/Y/Z, linear array
@@ -60,9 +66,10 @@ dotnet publish src\GRABEngine -c Release -o app
 * Block brush with Fill, Replace, **Erase**, Line, Box and Sphere modes (B), shape/material/
   cell-size palette, vertical layers, hollow shells and live ghost previews. Each stroke is
   one undo step and is grouped in the hierarchy, so a 500-block voxel wall does not bury the
-  scene. Optional X/Z/Both symmetry mirrors every stroke across a movable pivot. The **Smart
-  Palette** remembers recent brush setups and lets you save favourites with **☆ Save preset**;
-  clicking a chip restores its material, colour, shape, cell size, layers and hollow flag.
+  scene. Optional X/Z/Both symmetry mirrors every stroke across a movable pivot, and **No tex**
+  makes every stroke untextured. The **Smart Palette** remembers recent brush setups and lets
+  you save favourites with **☆ Save preset**; clicking a chip restores its material, colour,
+  shape, cell size, layers and hollow flag.
 
 * Prefab library with save/spawn plus a **prefab stamp brush**: pick a prefab, move the live
   preview across the level, rotate with `[` / `]`, and click to place as many copies as you
@@ -101,8 +108,9 @@ dotnet publish src\GRABEngine -c Release -o app
 * **Draw Structures** (G, or Tools → Draw Structures): drag a footprint in the scene to make a
   box, sphere, cylinder, cone, staircase or ramp, with a live block preview. **Custom Shape**
   draws a polygon point by point and extrudes it into blocks. Height is one slider (`[` / `]`
-  also work), materials/colours are in the palette, and Face snap builds directly against the
-  block you point at. The palette now has **Level ground** and **Carve foundation** modes that
+  also work), materials/colours are in the palette, **No texture (flat untextured surface)**
+  removes the texture from every placed block, and Face snap builds directly against the block
+  you point at. The palette now has **Level ground** and **Carve foundation** modes that
   trim or fill the terrain under the footprint before the blocks are placed; the Structure &
   Shape Studio exposes the same setting with a carve-depth field.
 
@@ -111,6 +119,33 @@ dotnet publish src\GRABEngine -c Release -o app
   arches, pillars, doorways, towers, gable roofs, fences, platforms, frames, domes, torus/
   cylinder shells and voxel primitives. The advanced **Silhouette** section is still available
   for typed outlines.
+
+* **Maze Generator** (Tools → Maze Generator): rectangle grid mazes and **Circle** mazes built
+  from concentric rings joined by radial corridors, with **Perfect** (one route), **Braided**
+  (dead ends opened into loops), **Rooms** (chambers carved out), **Open** (pillar plaza) and
+  **Spiral** (one unbroken corridor to the centre — the hardest layout) styles. Difficulty
+  presets (Easy / Normal / Hard / Brutal) set the style and corridor width in one click.
+  Straight % controls how long corridors run, Loops % how many walls are opened, and the seed
+  rebuilds any layout exactly. **Finish → Centre (inside start)** boxes the finish in the middle
+  of the maze; circle mazes always finish in the hub. Optional floor slab (round for circle
+  mazes), ceiling slab and ceiling lights, plus entrance/exit openings that move the level's
+  existing Start and Finish instead of duplicating them. Walls are merged into long runs, so a
+  14×14 maze is a few hundred objects rather than thousands. The top-down preview draws the
+  shortest route and its step count, and the Start (S) and Finish (F) markers can be **dragged
+  onto any cell** — the maze and route redraw while you drag. **Build Maze** writes everything
+  as one editable group at the view target.
+
+* **Text → Blocks** (Tools → Text to Blocks): typesets real block lettering from any installed
+  font or a loaded `.ttf`/`.otf` file. Height sets the base block resolution, Detail (1–4)
+  supersamples the glyph edges, and Depth extrudes the letters. Fill offers Solid, Hollow shell
+  or Outline only. Letter and line gaps, base block size, block shape, material and colour are
+  adjustable, and the text can stand like wall lettering or lie flat on the floor. **Smooth
+  grid** refines the block resolution to 2× or 3× smaller blocks (the text keeps the same world
+  size) and fills with the largest boxes that fit, so lettering is clean instead of
+  stair-stepped. **Angled edge blocks** is an experimental extra that lays rotated bars along
+  the outline; it is off by default because their square ends can notch tight corners. The live
+  front-view preview draws every block footprint before **Generate Blocks** drops the group at
+  the view target.
 
 * **Smart snapping and measuring**: Grid/Face/Edge/Centre snap modes snap a moved object to
   the actual block under the cursor. The Measure tool (M) reports distance, delta and a live
@@ -121,8 +156,9 @@ dotnet publish src\GRABEngine -c Release -o app
   reachability. Problems select the object and highlight it in the scene.
 
 * **Level Optimizer & Budget** (Tools): reports object/complexity budgets and offers
-  **Merge adjacent identical cubes**, **Merge different block sizes on a shared grid** (0.25 m,
-  0.5 m, 1 m, 2 m or 4 m — useful for terrain columns and mixed-height builds), **Remove fully
+  **Merge adjacent identical cubes**, **Merge different block sizes on a shared grid** (type any
+  grid size in the free-form **Grid (m)** box — 0.25 m, 0.75 m, 6 m; useful for terrain columns
+  and mixed-height builds), **Remove fully
   enclosed blocks**, **Remove exact duplicate blocks**, **Remove zero-size blocks** and optional
   **Remove empty groups**. Protected physics, locked and animated objects are skipped. The
   mixed-size pass rebuilds each identical material/colour group on the chosen grid, so a 1×4
@@ -206,6 +242,12 @@ dotnet publish src\GRABEngine -c Release -o app
 * Inspector for every GRAB node type: blocks, crumbling blocks, groups (physics), spawn points,
   finish points, signs, lights (point/spot), triggers with sources and targets, gravity zones,
   particle emitters (all parameters), sounds, lobby terminals, Code Blocks and animations.
+  Every colour field in the editor (Inspector, ambience, brush, terrain, structures, layers,
+  maze and terrain studio) shows a live swatch next to its hex box; click the swatch to open
+  the **colour picker** — HSV square, hue and alpha strips, editable hex/RGB, quick colours —
+  and the value is written straight back to the field. For block paint, the picker also has a
+  **No texture (flat untextured surface)** switch and its swatch turns into a checkerboard;
+  the paint colour is kept in the project so unticking it restores the block's texture.
 
 * Level settings: title, creators, description, tags, version, complexity, checkpoint count,
   default spawn, unlisted, replays, practice mode.
@@ -376,9 +418,66 @@ same search in the editor (`Find Path`) uses the editor's real A* on the full 3D
 watched object costs roughly 160 GASM instructions per frame, which is why 24 is the default and
 96 is the cap; the bake message reports the exact count for the block you just made.
 
-Both kinds of block are ordinary C# Code Blocks — editable, undoable, and exported with the
-level. Retail GRAB has no navmesh or A* opcode, which is exactly why the live version does its
-planning with plain arithmetic on object positions.
+**Sensor modes (Bake Agent).** The **Sensor mode** dropdown adds two rig-based planners besides
+the live wall probing above. Both first place a rig of real trigger objects with **Place Sensor
+Rig**, then **Bake Agent** compiles it into one Code Block:
+
+* **Whisker ring (around finder)** — puts 4, 8 or 12 probe triggers in the finder's ring at
+  **Ring radius** (with a second, nearer ring when the radius is over 2.6 m). The probes become
+  the near/far clearance tests against the watched walls in the exported block, which scores the
+  free directions by how directly they head for the target, keeps a small bias toward the
+  direction it already chose (so it cannot chatter between two equal options), and steps along
+  the best free one. **Whisker dirs** and **Ring radius** are saved with the project. Because a
+  ring only senses a couple of metres, whisker mode also bakes the walkable **route graph** below:
+  the ring handles corners, the graph finds the way across the level.
+* **NavMesh surface (ground)** — lays flat trigger tiles over **every walkable cell reachable from
+  the finder**, not just the route the preview found: **Nav detail** is the tile spacing and
+  **Coverage** is how far from the finder the surface reaches. If a level is big enough to hit the
+  trigger cap the spacing widens automatically instead of dropping half the surface. Placing the
+  rig again replaces the old one instead of stacking tiles, and **Bake Agent always rebuilds the
+  navmesh rig first**, so a surface left over from an older, path-only placement can never be
+  baked by accident. A whisker ring is left alone: hand-moved probes are part of the sensing.
+
+**The baked route graph.** Baking a rig does not freeze a route. The exporter turns the placed
+surface (or, for whiskers, a walkable scan of the level) into a small navigation graph:
+
+1. **Route nodes** are spread over the ground with farthest-point sampling, always including the
+   finder's and the target's own spot. **Link range** is the longest straight hop between nodes.
+2. Two nodes are linked when the navigation grid's line-of-sight test passes, so an edge never
+   crosses a wall. Disconnected islands are joined at their closest pair so no node is stranded.
+3. All-pairs shortest paths (Floyd–Warshall) become a **next-hop table**, and that table is what
+   gets compiled into the Code Block.
+
+At runtime the block reads the target's **live** position every frame, finds the route node it is
+standing on, and looks up where to walk next. A target that moves to another part of the floor
+simply selects a different goal node, so the agent re-plans inside the game with no editor and no
+re-bake; the block also cuts straight at the target whenever it has a clear line of sight, and
+switches to live wall following for a moment when a wall that was moved at runtime cuts a baked
+edge. That is why the tiles cover the whole ground instead of one corridor: any part of it can
+become the target's part.
+
+The shipped program is one Code Block whose instruction count is well past the retail editor's
+150 cap (the runtime keeps instructions in a dynamic array, so it still loads and runs, exactly
+like the other extended bakes). More **Route nodes** means a more accurate graph and a bigger
+block; 18 is the default.
+
+**What the triggers do.** GRAB's trigger runtime only reports player parts (hands, head, feet,
+grapple, held block), so a trigger cannot report an arbitrary wall and no shipped trigger script
+can act as a collision sensor. The rig is therefore the *authoring* half: **Bake Agent reads the
+real world positions of the placed trigger objects** and compiles them into the generated program
+as probe points and route nodes. The markers ship in the `.level` as normal trigger objects (they
+are ignored by the Build Validator's dead-trigger rule), and moving, deleting or re-spacing one
+and baking again changes what the agent senses. Rig markers are not gameplay triggers — leaving
+them without sources/targets is expected.
+
+Typical numbers from the self-test on a 20 × 14 m test floor with one blocking wall: the whisker
+rig places 8 probes, the navmesh rig lays 289 tiles at 1 m detail over the whole floor, and both
+bake 18 route nodes into 6 818 GASM instructions / 3 connections. Both agents pass a chase test
+that moves the target to four opposite corners of the floor, staying within about a metre.
+
+All kinds of block are ordinary C# Code Blocks — editable, undoable, and exported with the
+level. Retail GRAB has no navmesh or A* opcode, which is exactly why these planners do their
+work with plain arithmetic on object and probe positions.
 
 ### Block brush
 
@@ -394,9 +493,9 @@ keep painting without chasing a dialog.
 | **Sphere** | Drag from the centre outward to set the radius; **Hollow** makes a shell. |
 | **Erase** | Click or drag over blocks to delete them; mirrored erases remove the matching block on the other side too. |
 
-Shape, material, cell size (0.25–2), layers, hollow, colour and symmetry (None/X/Z/Both)
-are all in the palette. New blocks only occupy empty cells, so a brush never overwrites
-existing geometry. The preview updates live, and each stroke is a single undoable edit.
+Shape, material, cell size (0.25–2), layers, hollow, colour, **No tex** and symmetry
+(None/X/Z/Both) are all in the palette. New blocks only occupy empty cells, so a brush never
+overwrites existing geometry. The preview updates live, and each stroke is a single undoable edit.
 Drags are capped at 4096 cells (the status bar says when that happens). **Pivot** moves the
 symmetry plane to the selection centre; the transform menu exposes the same pivot.
 
@@ -404,6 +503,8 @@ symmetry plane to the selection centre; the transform menu exposes the same pivo
 
 Press **G** or click **Draw** in the toolbar. Pick a shape in the palette, then drag a footprint
 in the scene and release. The preview is a real block volume, not a separate scene object.
+Tick **No texture (flat untextured surface)** in the **Texture** row to place flat, untextured
+blocks (Color 1 exports as 99999999).
 
 | Shape | Gesture |
 | --- | --- |

@@ -48,6 +48,13 @@ public sealed class PathfindingWindow : Window
     private readonly CheckBox _follow = Theme.Check("Auto-follow target in Play mode", true);
     private readonly CheckBox _bakeLoop = Theme.Check("Loop the baked route", false);
     private readonly CheckBox _liveBake = Theme.Check("Live re-planning at runtime (reads moved walls and the current target)", true);
+    private readonly ComboBox _sensorMode = Theme.Combo(new[]
+    {
+        "Live wall probing", "Whisker ring (around finder)", "NavMesh surface (ground)"
+    });
+    private readonly ComboBox _whiskerDirs = Theme.Combo(new[] { "4", "8", "12" });
+    private readonly TextBlock _rigStatus = Theme.Hint("No sensor rig placed yet.");
+    private readonly Action<LevelNode>? _rigBuilt;
     private readonly List<ObjectItem> _items = new();
     private readonly List<Action> _refreshSliders = new();
     private bool _loading;
@@ -59,7 +66,7 @@ public sealed class PathfindingWindow : Window
 
     public PathfindingWindow(Window owner, GrabLevel level, Func<LevelNode?> selectedNode,
         Action<PathfindingResult?, bool> showPath, Action changed, Action startPlay,
-        Action<LevelNode>? baked = null)
+        Action<LevelNode>? baked = null, Action<LevelNode>? rigBuilt = null)
     {
         _level = level;
         _selectedNode = selectedNode;
@@ -67,6 +74,7 @@ public sealed class PathfindingWindow : Window
         _changed = changed;
         _startPlay = startPlay;
         _baked = baked;
+        _rigBuilt = rigBuilt;
 
         Title = "Pathfinding Studio";
         Width = 1080;
@@ -114,7 +122,7 @@ public sealed class PathfindingWindow : Window
         var header = new DockPanel();
         var title = new StackPanel();
         title.Children.Add(Theme.Heading("PATHFINDING STUDIO"));
-        title.Children.Add(Theme.Hint("A real 3D A* navmesh for GRAB ENGINE. Pick any two objects, press Find Path, then play to chase the target in real time — or bake it to a Code Block: Bake Live Nav keeps re-planning in the exported .level, Bake Route freezes the current path."));
+        title.Children.Add(Theme.Hint("A real 3D A* navmesh for GRAB ENGINE. Pick any two objects, press Find Path, then play to chase the target in real time — or bake it to a Code Block. Sensor mode chooses how the exported agent sees the level: live wall probing, a whisker probe ring around the finder, or a navmesh trigger surface over the ground."));
         header.Children.Add(title);
         var close = Theme.Button("Close", small: true);
         close.Click += (_, _) => Close();
@@ -152,9 +160,9 @@ public sealed class PathfindingWindow : Window
         clear.Margin = new Thickness(6, 0, 0, 0);
         clear.Click += (_, _) => { _showPath(null, false); _status.Text = "Route cleared."; _status.Foreground = Theme.Dim; };
         actions.Children.Add(clear);
-        var bake = Theme.Button("⬢  Bake Live Nav");
+        var bake = Theme.Button("⬢  Bake Agent");
         bake.Margin = new Thickness(12, 0, 0, 0);
-        bake.ToolTip = "Compiles a live runtime planner to a real GASM Code Block. The exported .level re-plans around moved walls and a moving target.";
+        bake.ToolTip = "Compiles the selected sensor mode (live walls, whisker ring or navmesh surface) to a real GASM Code Block.";
         bake.Click += (_, _) => BakePath();
         actions.Children.Add(bake);
         var play = Theme.Button("▶  Test in Play Mode");
@@ -225,8 +233,36 @@ public sealed class PathfindingWindow : Window
         panel.Children.Add(_showNav);
         panel.Children.Add(Theme.Hint("Nav mesh draws every walkable cell around the route as a translucent blue tile, and outlines the blocking objects a baked live planner would watch in orange."));
 
+        panel.Children.Add(Theme.SectionHeader("SENSOR MODE"));
+        panel.Children.Add(Theme.Row("Mode", _sensorMode, 92));
+        _sensorMode.SelectionChanged += (_, _) =>
+        {
+            if (_loading) return;
+            Settings.SensorMode = (PathSensorMode)Math.Clamp(_sensorMode.SelectedIndex, 0, 2);
+            SettingsChanged();
+        };
+        panel.Children.Add(Theme.Hint("Live wall probing steers off the watched wall boxes directly. Whisker ring places probe triggers around the finder for 8-way collision sensing. NavMesh surface lays trigger tiles over walkable ground and bakes them into a dense route — the most reliable through mazes, doorways and tight corridors."));
+        panel.Children.Add(Theme.Row("Whisker dirs", _whiskerDirs, 92));
+        _whiskerDirs.SelectionChanged += (_, _) =>
+        {
+            if (_loading) return;
+            Settings.WhiskerDirections = _whiskerDirs.SelectedIndex switch { 0 => 4, 2 => 12, _ => 8 };
+            SettingsChanged();
+        };
+        panel.Children.Add(SliderRow("Ring radius", 0.4, 5, 0.1, 1, () => Settings.WhiskerRadius, v => Settings.WhiskerRadius = (float)v, " m"));
+        panel.Children.Add(SliderRow("Nav detail", 0.35, 4, 0.05, 2, () => Settings.NavMeshDetail, v => Settings.NavMeshDetail = (float)v, " m"));
+        panel.Children.Add(SliderRow("Coverage", 2, 80, 1, 0, () => Settings.NavMeshArea, v => Settings.NavMeshArea = (float)v, " m"));
+        panel.Children.Add(SliderRow("Route nodes", 4, 40, 1, 0, () => Settings.NavMeshNodes, v => Settings.NavMeshNodes = (int)v, ""));
+        panel.Children.Add(SliderRow("Link range", 4, 60, 1, 0, () => Settings.NavMeshLinkRange, v => Settings.NavMeshLinkRange = (float)v, " m"));
+        panel.Children.Add(Theme.Hint("Nav detail is the spacing of the trigger tiles: smaller means more triggers and a finer surface. Coverage is how far from the finder the surface covers walkable ground (every reachable cell, not just the current route), so a target that moves still has ground painted around it. If a big level hits the trigger cap the spacing widens automatically. Route nodes is the size of the baked navigation graph: more nodes follow the ground more exactly but add instructions to the exported block. Link range is the longest straight hop between nodes. The navmesh rig is rebuilt on every Bake so the surface always matches the level; a whisker ring is kept so hand-moved probes stay put."));
+        var rigButton = Theme.Button("◫  Place Sensor Rig", small: true);
+        rigButton.ToolTip = "Places trigger markers for the selected sensor mode and refreshes the rig status";
+        rigButton.Click += (_, _) => PlaceRig();
+        panel.Children.Add(rigButton);
+        panel.Children.Add(_rigStatus);
+
         panel.Children.Add(Theme.SectionHeader("EXPORT TO GRAB"));
-        panel.Children.Add(Theme.Hint("Bake Live Nav creates a real Code Block that reads the current target and wall positions every frame. When the straight line is blocked it picks the end of that wall nearest the target, walks the face to that end and rounds it, then heads for the target again, so a wall that moves or a target that runs is re-planned inside retail GRAB. Turn live re-planning off to bake a fixed route instead."));
+        panel.Children.Add(Theme.Hint("Bake creates a real Code Block. In live mode it reads the target and wall positions every frame and follows the blocked wall to its end before rounding it. In whisker or navmesh mode the rig is turned into a navigation graph baked into the block: every frame the exported agent reads the target's live position, picks the node it is standing on and follows the baked next-hop table, so it keeps following a moving target and re-plans around moved walls without touching the editor. Live re-planning off bakes a frozen route instead."));
         panel.Children.Add(SliderRow("Blocking Objects", 1, 96, 1, 0, () => Settings.BlockingObjects, v => Settings.BlockingObjects = (int)v, ""));
         panel.Children.Add(Theme.Hint("Blocking Objects is how many walls the live planner watches. GRAB does not cap the connections, so raise it for dense levels; each object costs about 160 GASM instructions that the game runs every frame. Only objects inside the agent's height band count, nearest to the straight line first."));
         panel.Children.Add(_liveBake);
@@ -479,12 +515,15 @@ public sealed class PathfindingWindow : Window
             var s = Settings;
             s.Clamp();
             _traversalCombo.SelectedIndex = s.Traversal == PathfindingTraversal.Fly ? 1 : 0;
+            _sensorMode.SelectedIndex = (int)s.SensorMode;
+            _whiskerDirs.SelectedIndex = s.WhiskerDirections switch { 4 => 0, 12 => 2, _ => 1 };
             _showEditor.IsChecked = s.ShowPathInEditor;
             _showPlay.IsChecked = s.ShowPathInPlay;
             _showDots.IsChecked = s.ShowWaypoints;
             _showNav.IsChecked = s.ShowNavMesh;
             _follow.IsChecked = s.AutoFollowInPlay;
             RefreshAllSliderValues();
+            RefreshRigStatus();
         }
         finally { _loading = false; }
     }
@@ -612,9 +651,35 @@ public sealed class PathfindingWindow : Window
                 SetStatus("Cannot bake: " + path.Message, Theme.Error);
                 return;
             }
-            var result = _liveBake.IsChecked == true
-                ? PathfindingExporter.BakeRuntime(_level, Settings, finder, target)
-                : PathfindingExporter.Bake(_level, Settings, finder, path, loop: _bakeLoop.IsChecked == true);
+            PathExportResult result;
+            if (Settings.SensorMode == PathSensorMode.LiveWalls)
+            {
+                result = _liveBake.IsChecked == true
+                    ? PathfindingExporter.BakeRuntime(_level, Settings, finder, target)
+                    : PathfindingExporter.Bake(_level, Settings, finder, path, loop: _bakeLoop.IsChecked == true);
+            }
+            else
+            {
+                // Whisker probes are hand-placed markers, so an existing ring is kept
+                // (moving a probe changes the baked sensing). The navmesh surface is
+                // generated from the level, so it is always rebuilt: that guarantees the
+                // tiles (and therefore the route graph) cover the current walkable ground
+                // instead of an old, path-only placement.
+                bool rebuild = Settings.SensorMode == PathSensorMode.NavMesh ||
+                    !_level.AllNodes().Any(n => n.EditorLabel == PathSensorRig.LabelFor(Settings.SensorMode));
+                if (rebuild)
+                {
+                    var rig = PathSensorRig.Build(_level, Settings, finder, target, path);
+                    if (!rig.Success)
+                    {
+                        SetStatus(rig.Message, Theme.Error);
+                        return;
+                    }
+                    if (rig.Group != null) _rigBuilt?.Invoke(rig.Group);
+                    RefreshRigStatus();
+                }
+                result = PathfindingExporter.BakeSensors(_level, Settings, finder, target, path);
+            }
             SetStatus(result.Message, result.Success ? Theme.Ok : Theme.Error);
             if (result.Block != null)
             {
@@ -633,6 +698,53 @@ public sealed class PathfindingWindow : Window
         {
             SetStatus("Bake failed: " + ex.Message, Theme.Error);
         }
+    }
+
+    private void PlaceRig()
+    {
+        var finder = CurrentFinder();
+        var target = CurrentTarget();
+        if (finder == null)
+        {
+            SetStatus("Choose a finder object first.", Theme.Error);
+            return;
+        }
+        try
+        {
+            // Neither rig needs a route: the whisker ring is relative to the finder and
+            // the navmesh surface covers the walkable ground around it.
+            var rig = PathSensorRig.Build(_level, Settings, finder, target, null);
+            SetStatus(rig.Message, rig.Success ? Theme.Ok : Theme.Error);
+            if (rig.Success && rig.Group != null)
+            {
+                _settingsDirty = true;
+                _rigBuilt?.Invoke(rig.Group);
+            }
+            RefreshRigStatus();
+        }
+        catch (Exception ex)
+        {
+            SetStatus("Place Sensor Rig failed: " + ex.Message, Theme.Error);
+        }
+    }
+
+    private void RefreshRigStatus()
+    {
+        var label = PathSensorRig.LabelFor(Settings.SensorMode);
+        var count = string.IsNullOrEmpty(label)
+            ? 0
+            : _level.AllNodes().Count(n => n.EditorLabel == label);
+        _rigStatus.Text = Settings.SensorMode switch
+        {
+            PathSensorMode.LiveWalls => "Live mode reads the watched wall objects directly — no rig needed.",
+            PathSensorMode.Whiskers => count == 0
+                ? "No whisker rig placed. Press Place Sensor Rig to put probes around the finder."
+                : $"{count} whisker trigger(s) around the finder. Bake compiles the ring and a navigation graph of the walkable ground into the Code Block, so the agent follows the target anywhere on the floor.",
+            _ => count == 0
+                ? "No navmesh rig placed. Press Place Sensor Rig to cover the walkable ground."
+                : $"{count} navmesh trigger tile(s) cover the ground. Bake turns them into a live route graph; the exported agent re-plans to the target every frame."
+        };
+        _rigStatus.Foreground = count == 0 && Settings.SensorMode != PathSensorMode.LiveWalls ? Theme.Warning : Theme.Dim;
     }
 
     private void SetStatus(string text, Brush color)

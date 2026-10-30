@@ -17,6 +17,14 @@ public static class TextureLibrary
 
     public static string AssetRoot { get; set; } = Path.Combine(AppContext.BaseDirectory, "Assets");
 
+    /// <summary>Drops the tinted/brush caches so a colour-grade change is visible.</summary>
+    public static void ClearCache()
+    {
+        Raw.Clear();
+        Tinted.Clear();
+        TextCache.Clear();
+    }
+
     public static string TexturePath(string name) => Path.Combine(AssetRoot, "Textures", name + ".png");
     public static string ModelPath(string name) => Path.Combine(AssetRoot, "Models", name + ".sgm");
 
@@ -42,9 +50,8 @@ public static class TextureLibrary
         var src = RawTexture(texture);
         // GRAB's block textures carry alpha masks meant for other shaders. Solid blocks
         // must ignore that alpha or the wood/lava blocks turn into see-through lattices.
-        BitmapSource target = src;
-        if (opaque || tint.Ri != 255 || tint.Gi != 255 || tint.Bi != 255)
-            target = Tint(src, tint, opaque);
+        // Tint always runs so the in-game colour grade also applies to untinted blocks.
+        var target = Tint(src, tint, opaque);
         var brush = new ImageBrush(target)
         {
             Stretch = Stretch.Fill,
@@ -57,6 +64,24 @@ public static class TextureLibrary
         Tinted[key] = brush;
         return brush;
     }
+
+    /// <summary>
+    /// The display-only grade that matches GRAB's renderer. The game tonemaps every
+    /// albedo, which pulls the hue toward its own luma; without it, painted blocks and
+    /// the stock textures read noticeably more saturated in the editor than in game.
+    /// </summary>
+    public static (int R, int G, int B) GradePixel(int r, int g, int b)
+    {
+        if (!EngineSettings.GameColourGrade) return (r, g, b);
+        float luma = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+        return (
+            (int)MathF.Round(luma + (r - luma) * GameGradeSaturation),
+            (int)MathF.Round(luma + (g - luma) * GameGradeSaturation),
+            (int)MathF.Round(luma + (b - luma) * GameGradeSaturation));
+    }
+
+    /// <summary>How far colours are pulled toward luma to match the game.</summary>
+    public const float GameGradeSaturation = 0.9f;
 
     private static BitmapSource Tint(BitmapSource src, Col tint, bool opaque)
     {
@@ -74,9 +99,13 @@ public static class TextureLibrary
         byte b = (byte)Math.Clamp(tint.Bi, 0, 255);
         for (int i = 0; i < pixels.Length; i += 4)
         {
-            pixels[i] = (byte)(pixels[i] * b / 255);
-            pixels[i + 1] = (byte)(pixels[i + 1] * g / 255);
-            pixels[i + 2] = (byte)(pixels[i + 2] * r / 255);
+            var (pr, pg, pb) = GradePixel(
+                pixels[i + 2] * r / 255,
+                pixels[i + 1] * g / 255,
+                pixels[i] * b / 255);
+            pixels[i] = (byte)Math.Clamp(pb, 0, 255);
+            pixels[i + 1] = (byte)Math.Clamp(pg, 0, 255);
+            pixels[i + 2] = (byte)Math.Clamp(pr, 0, 255);
             if (opaque) pixels[i + 3] = 255;
         }
         var wb = new WriteableBitmap(w, h, 96, 96, PixelFormats.Bgra32, null);

@@ -25,6 +25,9 @@ public static class SceneBuilder
     private static Material? _padBlack;
     private static Material? _startGreen;
 
+    /// <summary>Drops cached materials after a display setting (colour grade) changes.</summary>
+    public static void ClearMaterialCache() => MaterialCache.Clear();
+
     public static Material BlockMaterial(LevelNode n)
     {
         string texture = MaterialInfo.Texture(n.Material);
@@ -34,9 +37,21 @@ public static class SceneBuilder
         // other materials sample their texture directly, so tinting them here made the
         // editor show colours the real game never renders (dark ice, brown wood, ...).
         var tint = MaterialInfo.IsColorable(n.Material) ? n.Color1 : Col.White;
-        string key = texture + "|" + tint.Hex + "|" + n.IsNeon + "|" + n.IsTransparent + "|" + n.IsAdditive + "|" + (int)(n.SpecularBrightness * 10) + "|" + tile.ToString("0.##");
+        string key = (n.NoTexture ? "flat" : texture) + "|" + tint.Hex + "|" + n.IsNeon + "|" + n.IsTransparent + "|" + n.IsAdditive + "|" + (int)(n.SpecularBrightness * 10) + "|" + tile.ToString("0.##");
         if (MaterialCache.TryGetValue(key, out var cached)) return cached;
-        var brush = TextureLibrary.GetBrush(texture, tint, !n.IsTransparent, tile);
+        // The 99999999 sentinel tells GRAB to skip the texture entirely; the real
+        // game then shades a plain white surface, so the viewport must match.
+        Brush brush;
+        if (n.NoTexture)
+        {
+            var flat = new SolidColorBrush(Colors.White);
+            flat.Freeze();
+            brush = flat;
+        }
+        else
+        {
+            brush = TextureLibrary.GetBrush(texture, tint, !n.IsTransparent, tile);
+        }
         var group = new MaterialGroup();
         if (n.IsNeon || n.IsAdditive)
         {

@@ -14,6 +14,7 @@ public static class EngineSettings
     {
         public bool ExtendedGasm { get; set; } = true;
         public bool ExtendedTriggerTargets { get; set; } = true;
+        public bool GameColourGrade { get; set; } = true;
     }
 
     private static readonly Data Current = Load();
@@ -77,6 +78,24 @@ public static class EngineSettings
         {
             if (Current.ExtendedTriggerTargets == value) return;
             Current.ExtendedTriggerTargets = value;
+            Save();
+        }
+    }
+
+    /// <summary>
+    /// GRAB renders blocks through a filmic tonemap, distance fog and sRGB conversion,
+    /// so the same albedo that fills the screen in the editor reads a little flatter on
+    /// the headset and on the Steam build. This grade (a small saturation pull towards
+    /// luma) makes the viewport match what the game actually shows. It is display-only:
+    /// textures and level data are untouched.
+    /// </summary>
+    public static bool GameColourGrade
+    {
+        get => Current.GameColourGrade;
+        set
+        {
+            if (Current.GameColourGrade == value) return;
+            Current.GameColourGrade = value;
             Save();
         }
     }

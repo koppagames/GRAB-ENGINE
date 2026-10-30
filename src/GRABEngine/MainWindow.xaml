@@ -73,6 +73,9 @@
                 <Separator/>
                 <MenuItem Header="Frame Scene" InputGestureText="F" Click="FrameAll_Click"/>
             </MenuItem>
+            <MenuItem Header="_View">
+                <MenuItem x:Name="ColourGradeMenuItem" Header="Match in-game colour grade" IsCheckable="True" Click="ColourGrade_Click" ToolTip="GRAB tonemaps every block, so colours land a little flatter in game than the raw texture. Turn this off to inspect the ungraded albedo."/>
+            </MenuItem>
             <MenuItem Header="_GameObject">
                 <MenuItem Header="Add GameObject or Component…" InputGestureText="Ctrl+A" Click="AddObjectMenu_Click"/>
                 <MenuItem Header="Add C# Script to Selection" Click="AddScriptComponent_Click"/>
@@ -118,12 +121,14 @@
                 <MenuItem Header="Terrain Sculptor..." InputGestureText="T" Click="TerrainTool_Click"/>
                 <MenuItem Header="Terrain &amp; World Builder..." Click="Terrain_Click"/>
                 <MenuItem Header="Structure Studio (Advanced)..." Click="StructureStudio_Click"/>
+                <MenuItem Header="Maze Generator..." Click="Maze_Click"/>
                 <MenuItem Header="Build Validation..." Click="ValidateLevel_Click"/>
                 <MenuItem Header="Clear Validation Overlay" Click="ClearValidation_Click"/>
                 <MenuItem Header="Level Optimizer &amp; Budget..." Click="Optimizer_Click"/>
                 <MenuItem Header="Prefab &amp; Asset Palette..." Click="PrefabPalette_Click"/>
                 <MenuItem Header="Audio Studio..." Click="AudioStudio_Click"/>
                 <MenuItem Header="Text to Speech..." Click="TextToSpeech_Click"/>
+                <MenuItem Header="Text to Blocks..." Click="TextToBlocks_Click"/>
                 <MenuItem Header="Neural Lab..." Click="NeuralLab_Click"/>
                 <MenuItem Header="Pathfinding Studio..." Click="Pathfinding_Click"/>
                 <MenuItem Header="Script Compiler (GASM limits)..." Click="CompilerSettings_Click"/>
@@ -342,6 +347,9 @@
                                 <Border x:Name="BrushColorSwatch" Width="24" Height="18" CornerRadius="2"
                                         BorderBrush="#FF606060" BorderThickness="1" Margin="0,0,5,0"/>
                                 <TextBox x:Name="BrushColorBox" Width="72" Height="22" ToolTip="Block color (Default Colored material)"/>
+                                <CheckBox x:Name="BrushNoTextureCheck" Content="No tex" Click="BrushNoTexture_Click"
+                                          Margin="8,0,0,0" VerticalAlignment="Center"
+                                          ToolTip="Create brush blocks with no texture (Color 1 = 99999999)"/>
                             </StackPanel>
                             <TextBlock Grid.Row="4" Text="Mirror" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center"/>
                             <Grid Grid.Row="4" Grid.Column="1">
@@ -511,6 +519,7 @@
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="28"/>
                                 <RowDefinition Height="28"/>
+                                <RowDefinition Height="28"/>
                             </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="72"/>
@@ -535,6 +544,11 @@
                                 <TextBlock Text="Material" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center" Margin="9,0,5,0"/>
                                 <ComboBox x:Name="BuildMaterialCombo" Width="135" Height="23" SelectionChanged="BuildMaterial_Changed"/>
                             </StackPanel>
+                            <TextBlock Grid.Row="2" Text="Texture" Foreground="#FFB8B8B8" FontSize="11" VerticalAlignment="Center"/>
+                            <CheckBox x:Name="BuildNoTextureCheck" Grid.Row="2" Grid.Column="1"
+                                      Content="No texture (flat untextured surface)" Click="BuildNoTexture_Click"
+                                      VerticalAlignment="Center"
+                                      ToolTip="Create build blocks with no texture (Color 1 = 99999999)"/>
                         </Grid>
                         <Grid Margin="0,5,0,0">
                             <Grid.RowDefinitions>

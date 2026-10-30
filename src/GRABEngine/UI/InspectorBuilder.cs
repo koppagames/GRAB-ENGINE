@@ -139,9 +139,22 @@ public static class InspectorBuilder
                 {
                     foreach (var n in blocks) n.Color1 = v;
                     ctx.Changed();
+                }, getNoTexture: () => blocks[0].NoTexture, setNoTexture: v =>
+                {
+                    foreach (var n in blocks) n.NoTexture = v;
+                    ctx.Changed();
+                    ctx.Rebuild();
                 });
             else
                 Text(host, "Some materials use their own fixed texture colour; GRAB only paints Default Colored.");
+            var statics = blocks.Where(n => n.Kind == NodeKind.Static).ToList();
+            if (statics.Count > 0)
+                CheckField(host, "No texture (flat)", statics.All(n => n.NoTexture), v =>
+                {
+                    foreach (var n in statics) n.NoTexture = v;
+                    ctx.Changed();
+                    ctx.Rebuild();
+                });
         }
 
         AddSection(host, "ACTIONS");
@@ -218,13 +231,23 @@ public static class InspectorBuilder
                 bool painted = MaterialInfo.IsColorable(n.Material);
                 if (painted)
                 {
-                    ColorField(host, "Color 1 (paint)", n.Color1, v => { n.Color1 = v; ctx.Changed(); });
+                    ColorField(host, "Color 1 (paint)", n.Color1, v => { n.Color1 = v; ctx.Changed(); },
+                        getNoTexture: () => n.NoTexture,
+                        setNoTexture: v => { n.NoTexture = v; ctx.Changed(); ctx.Rebuild(); });
                     ColorField(host, "Color 2 (gradient)", n.Color2, v => { n.Color2 = v; ctx.Changed(); });
                 }
                 else
                 {
                     Text(host, MaterialInfo.Display(n.Material) + " uses its own fixed texture colour. GRAB only paints the Default Colored material.");
                 }
+                CheckField(host, "No texture (flat)", n.NoTexture, v =>
+                {
+                    n.NoTexture = v;
+                    ctx.Changed();
+                    ctx.Rebuild();
+                });
+                if (n.NoTexture)
+                    Text(host, "Exports Color 1 as 99999999, GRAB's \"no texture\" value. The block renders as a flat, untextured surface and ignores its paint colour.");
                 FloatField(host, "Specularity", n.SpecularBrightness, 0, 10, 0.1f, 2, v => { n.SpecularBrightness = v; ctx.Changed(); });
                 CheckField(host, "Neon", n.IsNeon, v => { n.IsNeon = v; ctx.Changed(); });
                 CheckField(host, "Transparent", n.IsTransparent, v => { n.IsTransparent = v; ctx.Changed(); });
@@ -1160,20 +1183,25 @@ public static class InspectorBuilder
         host.Children.Add(g);
     }
 
-    private static void ColorField(Panel host, string label, Col value, Action<Col> set)
+    private static void ColorField(Panel host, string label, Col value, Action<Col> set,
+        Func<bool>? getNoTexture = null, Action<bool>? setNoTexture = null)
     {
         var g = Row(label);
         var sp = new DockPanel();
-        var preview = new Border { Width = 26, Height = 18, Background = new SolidColorBrush(Color.FromArgb((byte)value.Ai, (byte)value.Ri, (byte)value.Gi, (byte)value.Bi)), BorderBrush = BorderBrush, BorderThickness = new Thickness(1), Margin = new Thickness(4, 0, 0, 0), CornerRadius = new CornerRadius(2) };
-        DockPanel.SetDock(preview, Dock.Left);
-        string hex = value.Hex + (value.Ai != 255 ? value.Ai.ToString("X2") : "");
-        var tb = new TextBox { Text = hex, VerticalContentAlignment = VerticalAlignment.Center };
+        var tb = new TextBox { Text = value.HexAlpha, VerticalContentAlignment = VerticalAlignment.Center };
+        Col last = value;
         void Apply()
         {
-            var c = Col.FromHex(tb.Text, value);
-            preview.Background = new SolidColorBrush(Color.FromArgb((byte)c.Ai, (byte)c.Ri, (byte)c.Gi, (byte)c.Bi));
+            var c = Col.FromHex(tb.Text, last);
+            if (c.Hex == last.Hex && c.Ai == last.Ai) return;
+            last = c;
             set(c);
         }
+        // The swatch opens the colour picker; picking commits straight away instead of
+        // waiting for a focus change the click on the swatch would otherwise swallow.
+        var preview = ColorInputs.CreateSwatch(tb, _ => Apply(), getNoTexture, setNoTexture);
+        preview.Margin = new Thickness(0, 0, 5, 0);
+        DockPanel.SetDock(preview, Dock.Left);
         tb.LostFocus += (_, _) => Apply();
         tb.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Apply(); Keyboard.ClearFocus(); } };
         sp.Children.Add(preview); sp.Children.Add(tb);

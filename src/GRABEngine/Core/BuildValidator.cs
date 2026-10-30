@@ -120,7 +120,9 @@ public static class BuildValidator
         if (overlaps >= 40)
             report.Issues.Add(new BuildIssue { Kind = BuildIssueKind.Info, Category = "Overlap", Message = "Overlap scan stopped after 40 pairs." });
 
-        foreach (var t in nodes.Where(n => n.Kind == NodeKind.Trigger))
+        // Probe markers placed by the pathfinding sensor rig are data for the code
+        // exporter, not gameplay triggers, so they are not dead events.
+        foreach (var t in nodes.Where(n => n.Kind == NodeKind.Trigger && !PathSensorRig.IsRigNode(n)))
         {
             if (t.TriggerSources.Count == 0 && t.TriggerTargets.Count == 0)
                 report.Issues.Add(new BuildIssue

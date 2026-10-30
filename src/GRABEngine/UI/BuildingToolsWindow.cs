@@ -150,7 +150,7 @@ public sealed class StructureStudioWindow : Window
         panel.Children.Add(Theme.SectionHeader("2 · SET THE HEIGHT"));
         panel.Children.Add(Theme.Row("Height", _drawHeight));
         panel.Children.Add(Theme.Row("Material", _drawMaterial));
-        panel.Children.Add(Theme.Row("Colour", _drawColor));
+        panel.Children.Add(Theme.Row("Colour", ColorInputs.Field(_drawColor)));
         panel.Children.Add(Theme.Hint("The outline is filled and extruded upward into normal GRAB blocks. The default is 1 m per cell."));
         var build = Theme.Button("Build Drawn Shape", accent: true);
         build.Margin = new Thickness(0, 8, 0, 0);
@@ -248,7 +248,7 @@ public sealed class StructureStudioWindow : Window
         settings.Children.Add(Theme.Row("Thickness", _thickness));
         settings.Children.Add(Theme.SectionHeader("STYLE"));
         settings.Children.Add(Theme.Row("Material", _material));
-        settings.Children.Add(Theme.Row("Colour", _color));
+        settings.Children.Add(Theme.Row("Colour", ColorInputs.Field(_color, _ => RefreshPreview())));
         settings.Children.Add(_railings);
         settings.Children.Add(_hollow);
         settings.Children.Add(Theme.SectionHeader("SYMMETRY"));

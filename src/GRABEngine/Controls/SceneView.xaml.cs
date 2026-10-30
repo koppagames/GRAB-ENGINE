@@ -70,6 +70,7 @@ public partial class SceneView : UserControl
     private bool _brushHollow;
     private int _brushLayers = 1;
     private Col _brushColor = new(0.72f, 0.72f, 0.72f, 1f);
+    private bool _brushNoTexture;
     private bool _brushStroke;
     private bool _brushHoverValid;
     private VoxelCell _brushAnchor;
@@ -94,6 +95,7 @@ public partial class SceneView : UserControl
     private bool _buildHollow;
     private int _buildMaterial = 8;
     private Col _buildColor = new(0.72f, 0.72f, 0.72f, 1f);
+    private bool _buildNoTexture;
     private bool _buildDragging;
     private bool _buildHoverValid;
     private VoxelCell _buildAnchor;
@@ -209,6 +211,13 @@ public partial class SceneView : UserControl
         set { _buildColor = value; RefreshBuildPreview(); }
     }
 
+    /// <summary>Place build-tool blocks with GRAB's no-texture surface.</summary>
+    public bool BuildNoTexture
+    {
+        get => _buildNoTexture;
+        set { _buildNoTexture = value; RefreshBuildPreview(); }
+    }
+
     public TerrainFoundationMode BuildFoundation
     {
         get => _buildFoundation;
@@ -316,6 +325,13 @@ public partial class SceneView : UserControl
     {
         get => _brushColor;
         set { _brushColor = value; RefreshBrushPreview(); }
+    }
+
+    /// <summary>Brush strokes create blocks with GRAB's no-texture surface.</summary>
+    public bool BrushNoTexture
+    {
+        get => _brushNoTexture;
+        set { _brushNoTexture = value; RefreshBrushPreview(); }
     }
 
     public bool BrushActive => !PlayMode && _tool == EditorTool.Brush && _brushMode != BlockBrushMode.None;
@@ -2317,6 +2333,7 @@ public partial class SceneView : UserControl
                     Shape = ShapeInfo.Cube,
                     Material = _buildMaterial,
                     Color1 = _buildColor,
+                    NoTexture = _buildNoTexture,
                     Position = BlockBrushMath.Center(cell, 1.0),
                     Scale = Vec3.One
                 };
@@ -2625,6 +2642,7 @@ public partial class SceneView : UserControl
                     Shape = _brushShape,
                     Material = _brushMaterial,
                     Color1 = _brushColor,
+                    NoTexture = _brushNoTexture,
                     Position = BlockBrushMath.Center(cell, size),
                     Rotation = Quat.Identity,
                     Scale = new Vec3((float)size, (float)size, (float)size)
@@ -2650,8 +2668,9 @@ public partial class SceneView : UserControl
     /// no-op fill says "nothing changed" instead of dirtying the level.</summary>
     private bool ApplyBrushMaterial(LevelNode node)
     {
-        bool changed = node.Material != _brushMaterial;
+        bool changed = node.Material != _brushMaterial || node.NoTexture != _brushNoTexture;
         node.Material = _brushMaterial;
+        node.NoTexture = _brushNoTexture;
         if (!MaterialInfo.IsColorable(_brushMaterial)) return changed;
         if (node.Color1.Ri != _brushColor.Ri || node.Color1.Gi != _brushColor.Gi || node.Color1.Bi != _brushColor.Bi)
             changed = true;
