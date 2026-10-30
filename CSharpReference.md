@@ -1,4 +1,4 @@
-# GRAB ENGINE — C# Scripting Reference
+﻿# GRAB ENGINE — C# Scripting Reference
 
 This is the complete manual for writing C# in GRAB ENGINE. It covers the editor workflow,
 the two ways to attach a script, the Unity-style component system, the supported C# language,
@@ -1055,6 +1055,12 @@ Use `Voxel.Grid`, `Voxel.Line` or `Voxel.Ring` for many compile-time blocks.
 | `LobbyTerminal` | `new LobbyTerminal()` |
 
 All arguments must be compile-time constants.
+
+> **Shading.** GRAB's block inspector has one *Rendering* list: `Default`, `Specularity`,
+> `Neon`, `Transparent`, `Additive`, `Gradient`. A block shows `Default` while `Specular` is 0
+> and `Neon`/`Transparent`/`Additive`/`Gradient` are off, which is what a block placed in the
+> real editor looks like — so blocks you create start at `Specular = 0`, and they export that way.
+> Set `Specular` above 0 only when you want the shiny `Specularity` mode.
 
 ### 8.3 Object initializer properties
 
@@ -2211,7 +2217,7 @@ name. You can rename either one without renaming the other.
 
 ---
 
-## 24. How C# becomes GASM, limits and continuation blocks
+## 24. How C# becomes GASM, limits and compiler modes
 
 ### 24.1 What the compiler emits
 
@@ -2230,21 +2236,32 @@ name. You can rename either one without renaming the other.
 The compiled program and its connections are written into the Code Block's protobuf fields when
 you export the `.level`.
 
-### 24.2 Hard limits
+### 24.2 Limits, and which ones are real
 
-| Limit | Value | Applies to |
+GRAB's GASM screen shows 150 instructions, 10 connections and 480 registers. Those numbers are
+the **screen's** caps, not the interpreter's: the runtime keeps instructions, connections and
+registers in dynamic arrays, and a `.level` is loaded straight into them. A Code Block that
+already contains a longer program runs, which is why custom register names written into a file
+also survive loading.
+
+GRAB ENGINE therefore compiles **one extended Code Block** by default (`Tools → Script Compiler`).
+Nothing is paged, there is no bus object and no per-frame hand-off, and a single statement may use
+the whole budget. Switch the mode to **split** if you want the old continuation-page behaviour, for
+example to keep a level openable and editable in the retail GASM screen.
+
+| Limit | Value | Enforced by |
 |---|---:|---|
-| Instructions per Code Block | 150 | one compiled program/page |
-| Connections per Code Block | 10 | objects, player, lobby and generated targets |
-| Working registers per program | 480 | all fields, temporaries, arrays and collections |
-| Array length | 32 | each fixed-size array |
-| Collection capacity | 32 | each `List` / `Dictionary` |
-| Sign characters | 150 | one sign's text |
-| Trigger targets | 17 | one Trigger |
-| Transparent blocks | 20 | level-wide |
-| Physics groups | 100 | level-wide |
-| Animation frames | 1000 | per object |
-| Named spawn points | 10 | level-wide |
+| Instructions per Code Block | 150 | the retail editor only — bypassed by default |
+| Connections per Code Block | 10 | the retail editor only — bypassed by default |
+| Working registers per program | 480 | the retail editor only — bypassed by default |
+| Array length | 32 / 512 | the compiler (GASM has no heap) |
+| Collection capacity | 32 / 512 | the compiler |
+| Sign characters | 150 | the game |
+| Trigger targets | 17 | the game |
+| Transparent blocks | 20 | level-wide, the game |
+| Physics groups | 100 | level-wide, the game |
+| Animation frames | 1000 | per object, the game |
+| Named spawn points | 10 | level-wide, the game |
 | Overlapping lights | 3 | GRAB disables the newest past three |
 
 The compiler itself uses four-character connection names (for example `bl00`, `tr02`, `sg01`).
@@ -2253,11 +2270,11 @@ four-character connection name for each object. The object's display name can be
 the internal connection name has the four-character restriction. If an object is renamed after
 compiling, recompile so `GameObject.Find` rebuilds the connection.
 
-### 24.3 Continuation Code Blocks
+### 24.3 Split mode: continuation Code Blocks
 
-GRAB limits one Code Block to 150 instructions and 10 connections. GRAB ENGINE does **not**
-reject a script merely because its total is larger than one page. It splits the update loop into
-pages and creates extra Code Blocks automatically. The splitter now checks both budgets before
+In **split** mode (`Tools → Script Compiler`) GRAB ENGINE keeps every generated program inside
+the retail editor's 150-instruction / 10-connection window. It splits the update loop into pages
+and creates extra Code Blocks automatically instead of rejecting the script. The splitter now checks both budgets before
 compiling each statement: it breaks the page when the next statement would exceed the
 instruction budget **or** when it would add a scene object connection that no longer fits. This
 is what keeps a large script with many `GameObject.Find` bindings from failing with “Page N
@@ -2290,8 +2307,8 @@ statement has to fit on one page.
 * The split applies to `Update()` (or to `Start()` when the script has no update loop). A
   `Start()` that must run before a separate update loop has to fit in one block on its own.
 * A single statement must fit in one page. A huge loop or an extremely long sign write is
-  compiled as one unit; keep each one under GRAB's 150-instruction limit and leave headroom for
-  the loop branch and page hand-off instructions.
+  compiled as one unit; keep each one under the 150-instruction page budget and leave headroom for
+  the loop branch and page hand-off instructions. Extended mode removes this constraint.
 * When a script is paged, the paged loop body is the primary loop method: `Update` when present,
   otherwise `FixedUpdate`, otherwise `LateUpdate`. Keep extra loop callbacks small or put their
   work in `Update` for very large scripts.

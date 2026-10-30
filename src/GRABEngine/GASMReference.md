@@ -22,6 +22,25 @@ Everything is numbers, and your program runs one line at a time.
 
 ---
 
+## Limits: editor vs. runtime
+
+| Limit | Retail editor | Runtime / loaded `.level` |
+|---|---|---|
+| Instructions per Code Block | 150 | no limit — stored in a dynamic array |
+| Object connections per Code Block | 10 | no limit — stored in a dynamic array |
+| Registers per Code Block | 480 | no limit — dynamic arrays, custom names allowed |
+| Trigger targets | 17 | enforced |
+| Connection name length | 4 characters | 4 characters |
+
+GRAB's GASM screen refuses to keep more than 150 instructions, 10 connections or 480 registers,
+and it truncates a program pasted into it. The interpreter that executes a level does not use
+those numbers: a Code Block that already contains a longer program is loaded and executed as-is,
+which is also why custom register names written into a `.level` keep working.
+
+GRAB ENGINE compiles to one extended Code Block by default, so the numbers in the first three rows
+are informational. `Tools → Script Compiler` switches to split mode, which keeps every generated
+page inside the editor's caps using continuation Code Blocks.
+
 ## Value Model
 
 **Everything is a number. Even “true/false.”**

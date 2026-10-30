@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -207,7 +207,7 @@ public static class LevelIO
                 n.IsPassable = PbReader.Bool(c, 12);
                 n.IsGradient = PbReader.Bool(c, 13);
                 n.GradientDirection = PbReader.Vec3(c, 14, new Vec3(0, 1, 0));
-                n.SpecularBrightness = PbReader.Float(c, 15, 3f);
+                n.SpecularBrightness = PbReader.Float(c, 15, 0f);
                 n.IsAdditive = PbReader.Bool(c, 16);
                 if (n.Shape == 0) n.Shape = ShapeInfo.Cube;
                 break;

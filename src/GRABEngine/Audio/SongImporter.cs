@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -152,7 +152,7 @@ public static class SongImporter
             block.Script = script;
             group.Children.Add(block);
             level.RebuildParents();
-            var compiled = new CSharpCompiler().Compile(level, block, script);
+            var compiled = new CSharpCompiler { AllowExtendedGasm = EngineSettings.ExtendedGasm }.Compile(level, block, script);
             block.Compiled = compiled;
             schedulers.Add(block);
             result.Blocks++;
@@ -172,7 +172,7 @@ public static class SongImporter
         if (master != null && schedulers.Count > 0)
         {
             var finalIds = level.BuildObjectIds();
-            foreach (var scheduler in schedulers.Take(GrabLimits.MaxTriggerTargets))
+            foreach (var scheduler in schedulers.Take(GrabLimits.TriggerTargetBudget))
             {
                 master.TriggerTargets.Add(new TriggerTarget
                 {

@@ -135,6 +135,9 @@ public partial class SceneView : UserControl
     private bool _prefabPlacementValid;
     private double _prefabYaw;
     private readonly List<BuildIssue> _validationIssues = new();
+    private PathfindingResult? _pathPreview;
+    private bool _pathPreviewWaypoints = true;
+    private string _pathPreviewSignature = "";
 
     private readonly record struct BrushPick(LevelNode? Node, Point3D Point, Vector3D Normal, VoxelCell Cell);
     private readonly record struct BrushPreviewState(
@@ -932,6 +935,131 @@ public partial class SceneView : UserControl
     {
         _validationIssues.Clear();
         if (ValidationVisual != null) ValidationVisual.Content = null;
+    }
+
+    // ================= pathfinding overlay =================
+
+    /// <summary>Shows a live A* route in the overlay viewport. Pass null to clear it.</summary>
+    public void ShowPath(PathfindingResult? path, bool showWaypoints = true)
+    {
+        if (path == null || !path.Success || path.Points.Count == 0)
+        {
+            ClearPath();
+            return;
+        }
+        _pathPreviewWaypoints = showWaypoints;
+        var signature = new System.Text.StringBuilder();
+        signature.Append(path.Points.Count).Append(':').Append(showWaypoints)
+            .Append(':').Append(path.NavCells.Count).Append(':').Append(path.WatchWalls.Count)
+            .Append(':').Append(path.NavCellSize.ToString("0.###"));
+        foreach (var p in path.Points)
+            signature.Append(':').Append(p.X.ToString("0.###")).Append(',').Append(p.Y.ToString("0.###")).Append(',').Append(p.Z.ToString("0.###"));
+        string sig = signature.ToString();
+        if (sig == _pathPreviewSignature) return;
+        _pathPreview = path;
+        _pathPreviewSignature = sig;
+        RefreshPathVisual();
+    }
+
+    public void ClearPath()
+    {
+        _pathPreview = null;
+        _pathPreviewSignature = "";
+        if (PathVisual != null) PathVisual.Content = null;
+        if (NavVisual != null) NavVisual.Content = null;
+    }
+
+    /// <summary>
+    /// Walkable navmesh tiles plus the objects a baked live planner would watch. Drawn in
+    /// the overlay viewport so the grid reads through geometry, and built as one merged
+    /// mesh per colour so thousands of cells stay cheap.
+    /// </summary>
+    private void RefreshNavVisual()
+    {
+        if (NavVisual == null) return;
+        var nav = _pathPreview;
+        if (nav == null || nav.NavCells.Count == 0)
+        {
+            NavVisual.Content = null;
+            return;
+        }
+        var group = new Model3DGroup();
+        group.Children.Add(new AmbientLight(Color.FromRgb(235, 235, 235)));
+        float cell = MathF.Max(0.1f, nav.NavCellSize) * 0.9f;
+        var tiles = new MeshBuilder();
+        foreach (var c in nav.NavCells)
+        {
+            double x0 = c.X - cell * 0.5, x1 = c.X + cell * 0.5;
+            double z0 = c.Z - cell * 0.5, z1 = c.Z + cell * 0.5;
+            double y = c.Y + 0.04;
+            tiles.Quad(new Point3D(x0, y, z0), new Point3D(x0, y, z1),
+                new Point3D(x1, y, z1), new Point3D(x1, y, z0), new Vector3D(0, 1, 0));
+        }
+        var tileMaterial = SceneMaterial(new Col(0.22f, 0.66f, 1f, 0.28f));
+        group.Children.Add(new GeometryModel3D(tiles.ToMesh(), tileMaterial) { BackMaterial = tileMaterial });
+
+        if (nav.WatchWalls.Count > 0)
+        {
+            var boxes = new MeshBuilder();
+            foreach (var wall in nav.WatchWalls)
+            {
+                var (c, s) = SceneBuilder.BoundsOf(wall);
+                boxes.WireBox(new Point3D(c.X, c.Y, c.Z),
+                    new Vector3D(Math.Max(0.06, s.X + 0.06), Math.Max(0.06, s.Y + 0.06), Math.Max(0.06, s.Z + 0.06)), 0.035);
+            }
+            var watchMaterial = SceneMaterial(new Col(1f, 0.55f, 0.15f, 0.85f));
+            group.Children.Add(new GeometryModel3D(boxes.ToMesh(), watchMaterial) { BackMaterial = watchMaterial });
+        }
+        NavVisual.Content = group;
+    }
+
+    private void RefreshPathVisual()
+    {
+        if (PathVisual == null) return;
+        if (_pathPreview == null || !_pathPreview.Success || _pathPreview.Points.Count == 0)
+        {
+            PathVisual.Content = null;
+            return;
+        }
+        var group = new Model3DGroup();
+        group.Children.Add(new AmbientLight(Color.FromRgb(230, 230, 230)));
+        var cyan = new Col(0.12f, 0.86f, 1f);
+        var lime = new Col(0.3f, 1f, 0.48f);
+        var amber = new Col(1f, 0.62f, 0.12f);
+        var line = new MeshBuilder();
+        var points = _pathPreview.Points;
+        for (int i = 1; i < points.Count; i++)
+        {
+            var a = points[i - 1] + new Vec3(0, 0.12f, 0);
+            var b = points[i] + new Vec3(0, 0.12f, 0);
+            line.Line(new Point3D(a.X, a.Y, a.Z), new Point3D(b.X, b.Y, b.Z), 0.075);
+        }
+        var lineMat = SceneMaterial(cyan);
+        group.Children.Add(new GeometryModel3D(line.ToMesh(), lineMat) { BackMaterial = lineMat });
+
+        if (_pathPreviewWaypoints)
+        {
+            foreach (var p in points.Skip(1).Take(Math.Max(0, points.Count - 2)))
+            {
+                var dot = new MeshBuilder();
+                dot.Box(new Point3D(p.X, p.Y + 0.14, p.Z), new Vector3D(0.16, 0.16, 0.16));
+                var mat = SceneMaterial(cyan);
+                group.Children.Add(new GeometryModel3D(dot.ToMesh(), mat) { BackMaterial = mat });
+            }
+        }
+        var start = new MeshBuilder();
+        start.Box(new Point3D(points[0].X, points[0].Y + 0.16, points[0].Z), new Vector3D(0.28, 0.28, 0.28));
+        var startMat = SceneMaterial(lime);
+        group.Children.Add(new GeometryModel3D(start.ToMesh(), startMat) { BackMaterial = startMat });
+
+        var goal = new MeshBuilder();
+        goal.Circle(new Point3D(points[^1].X, points[^1].Y + 0.14, points[^1].Z), new Vector3D(0, 1, 0), 0.38, 0.075, 28);
+        goal.Line(new Point3D(points[^1].X, points[^1].Y + 0.05, points[^1].Z),
+            new Point3D(points[^1].X, points[^1].Y + 0.9, points[^1].Z), 0.07);
+        var goalMat = SceneMaterial(amber);
+        group.Children.Add(new GeometryModel3D(goal.ToMesh(), goalMat) { BackMaterial = goalMat });
+        PathVisual.Content = group;
+        RefreshNavVisual();
     }
 
     private void RefreshValidationVisual()

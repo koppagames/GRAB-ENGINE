@@ -99,6 +99,14 @@ public partial class CodeEditorControl : UserControl
         int instructions = result.Program.Instructions.Count;
         int connections = result.Connections.Count;
         int registers = result.Program.WorkingRegisters.Count;
+        if (result.AllowExtendedLimits)
+        {
+            // The retail editor's 150 / 10 / 480 numbers do not apply to the runtime, so a
+            // single extended Code Block is reported as budget-free instead of "over".
+            GasCostText.Text = $"GASM {instructions}  ·  conn {connections}  ·  reg {registers}  ·  extended block";
+            GasCostText.Foreground = new SolidColorBrush(Color.FromRgb(127, 200, 160));
+            return;
+        }
         double worst = Math.Max(instructions / (double)GrabLimits.MaxInstructions, connections / (double)GrabLimits.MaxConnections);
         GasCostText.Text = $"GASM {instructions}/{GrabLimits.MaxInstructions}  ·  conn {connections}/{GrabLimits.MaxConnections}  ·  reg {registers}";
         GasCostText.Foreground = new SolidColorBrush(worst >= 1 ? Color.FromRgb(235, 110, 100)

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -537,6 +537,14 @@ internal sealed class WriteLValue : CLValue
 
 public sealed class CSharpCompiler
 {
+    /// <summary>
+    /// Generate one unrestricted GASM program instead of splitting at the retail
+    /// editor's 150-instruction / 10-connection UI caps. The game runtime keeps
+    /// programs, connections and registers in dynamic vectors, so exported levels
+    /// can execute these blocks; the in-game editor may not be able to edit them.
+    /// </summary>
+    public bool AllowExtendedGasm { get; set; }
+
     private readonly List<Diagnostic> _diags = new();
     private GrabLevel _level = null!;
     private LevelNode? _codeBlock;
@@ -569,6 +577,7 @@ public sealed class CSharpCompiler
     private int _errorReg = -1;
     private int _coroutineCounter;
     private bool _allowSplit;
+    private bool _allowExtended;
     private int _pageIndex;
     private LevelNode? _pageNode;
     private readonly List<LevelNode> _busNodes = new();
@@ -616,7 +625,14 @@ public sealed class CSharpCompiler
     {
         var single = CompileCore(level, codeBlock, source, allowSplit: false);
         GasmCompileResult result;
-        if (single.Program.Instructions.Count <= GrabLimits.MaxInstructions
+        if (AllowExtendedGasm)
+        {
+            // The game's GASM runtime has dynamic instruction, connection and
+            // register arrays. Only the retail editor UI enforces 150 / 10 / 480.
+            DeactivateContinuations(level, codeBlock);
+            result = single;
+        }
+        else if (single.Program.Instructions.Count <= GrabLimits.MaxInstructions
             && single.Connections.Count <= GrabLimits.MaxConnections
             && single.Program.WorkingRegisters.Count <= 480)
         {
@@ -668,6 +684,7 @@ public sealed class CSharpCompiler
     private GasmCompileResult CompileCore(GrabLevel level, LevelNode codeBlock, string source, bool allowSplit)
     {
         _allowSplit = allowSplit;
+        _allowExtended = AllowExtendedGasm;
         _pageIndex = 0;
         _pageNode = codeBlock;
         _consoleNode = null;
@@ -712,7 +729,7 @@ public sealed class CSharpCompiler
             if (!string.IsNullOrEmpty(c.Name)) _typeDecls[c.Name] = c;
         var ids = level.BuildObjectIds();
         _objectIds = ids;
-        _e = new GasmEmitter(ids, _diags);
+        _e = new GasmEmitter(ids, _diags, _allowExtended);
         _class = _unit.Classes.FirstOrDefault(c => c.Methods.Any(m => m.Name is "Update" or "Start"))
                  ?? _unit.Classes.FirstOrDefault();
         _scriptDef = _class != null
@@ -763,9 +780,10 @@ public sealed class CSharpCompiler
             Connections = _e.Connections,
             GasmText = _e.BuildText().ToList(),
             Diagnostics = _diags,
-            BlockNode = node
+            BlockNode = node,
+            AllowExtendedLimits = _allowExtended
         };
-        if (result.Program.Instructions.Count > GrabLimits.MaxInstructions)
+        if (!_allowExtended && result.Program.Instructions.Count > GrabLimits.MaxInstructions)
         {
             _diags.Add(new Diagnostic
             {
@@ -774,7 +792,7 @@ public sealed class CSharpCompiler
                 File = "Script.cs"
             });
         }
-        if (result.Connections.Count > GrabLimits.MaxConnections)
+        if (!_allowExtended && result.Connections.Count > GrabLimits.MaxConnections)
         {
             _diags.Add(new Diagnostic
             {
@@ -807,7 +825,7 @@ public sealed class CSharpCompiler
 
     private void ValidateGrabLimits()
     {
-        if (_allowSplit) return;
+        if (_allowSplit || _allowExtended) return;
         int instructions = _e.Program.Instructions.Count;
         if (instructions > GrabLimits.MaxInstructions)
         {
@@ -2664,7 +2682,7 @@ public sealed class CSharpCompiler
         else _continuations.Add(page);
         _pageIndex++;
         _pageNode = EnsurePageNode(_pageIndex);
-        _e = new GasmEmitter(_e.ObjectIds, _diags);
+        _e = new GasmEmitter(_e.ObjectIds, _diags, _allowExtended);
         StartPage(_pageIndex);
     }
 
@@ -5465,9 +5483,10 @@ public sealed class CSharpCompiler
                 Error(n, "Array creation needs a size, e.g. new float[4]");
                 return CValue.F(0);
             }
-            if (size <= 0 || size > 32)
+            int maxArray = _allowExtended ? 512 : 32;
+            if (size <= 0 || size > maxArray)
             {
-                Error(n, $"Array size must be 1..32 (this program asked for {size}); GASM has no heap and only 150 instructions.");
+                Error(n, $"Array size must be 1..{maxArray} (this program asked for {size}); GASM has no heap, and large arrays become long dynamic-index chains.");
                 return CValue.F(0);
             }
 
@@ -5652,7 +5671,7 @@ public sealed class CSharpCompiler
         node.Color1 = new Col(0.72f, 0.72f, 0.72f, 1);
         node.Color2 = new Col(0.15f, 0.15f, 0.15f, 1);
         node.GradientDirection = new Vec3(0, 1, 0);
-        node.SpecularBrightness = 3f;
+        node.SpecularBrightness = 0f;
         node.PhysicsObject = false;
         node.LocalPhysicsObject = false;
         node.Mass = 1f;

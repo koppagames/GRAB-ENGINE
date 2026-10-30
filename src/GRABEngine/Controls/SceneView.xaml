@@ -31,6 +31,10 @@
             <!-- Build validation markers sit in the overlay viewport so a red box is
                  visible even when the problem is inside or behind geometry. -->
             <ModelVisual3D x:Name="ValidationVisual"/>
+            <!-- Live pathfinding route. It uses the overlay viewport so the route is
+                 readable through walls while the agent is still hidden behind them. -->
+            <ModelVisual3D x:Name="NavVisual"/>
+            <ModelVisual3D x:Name="PathVisual"/>
         </Viewport3D>
         <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10" Background="#AA202020"
                 BorderBrush="#FF3C3C3C" BorderThickness="1" CornerRadius="3" Padding="8,4" IsHitTestVisible="False">

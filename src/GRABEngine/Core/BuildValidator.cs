@@ -140,8 +140,11 @@ public static class BuildValidator
                 report.Issues.Add(new BuildIssue
                 {
                     Node = t, Position = t.WorldPosition, Size = SizeOf(t),
-                    Kind = BuildIssueKind.Error, Category = "Trigger",
-                    Message = $"'{t.DisplayName}' has {t.TriggerTargets.Count} targets; GRAB allows {GrabLimits.MaxTriggerTargets}."
+                    Kind = EngineSettings.ExtendedTriggerTargets ? BuildIssueKind.Info : BuildIssueKind.Error,
+                    Category = "Trigger",
+                    Message = EngineSettings.ExtendedTriggerTargets
+                        ? $"'{t.DisplayName}' has {t.TriggerTargets.Count} targets. That runs, but the retail editor's trigger screen only shows and adds {GrabLimits.MaxTriggerTargets}; edit it in GRAB ENGINE."
+                        : $"'{t.DisplayName}' has {t.TriggerTargets.Count} targets; the retail editor allows {GrabLimits.MaxTriggerTargets}."
                 });
             foreach (var target in t.TriggerTargets)
             {

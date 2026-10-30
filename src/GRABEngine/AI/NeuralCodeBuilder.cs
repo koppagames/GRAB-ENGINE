@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -490,7 +490,7 @@ public static class NeuralCodeBuilder
         existing.StartActive = config.StartActive;
         existing.LateUpdate = config.LateUpdate;
         config.CodeBlockId = existing.EditorId;
-        var compile = new CSharpCompiler().Compile(level, existing, source);
+        var compile = new CSharpCompiler { AllowExtendedGasm = EngineSettings.ExtendedGasm }.Compile(level, existing, source);
         existing.Compiled = compile;
         result.Compile = compile;
         result.Block = existing;
@@ -521,7 +521,7 @@ public static class NeuralCodeBuilder
             {
                 var trainerSource = NeuralTrainerBlock.BuildSource(level, config);
                 result.TrainerBlock = EnsureTrainerBlock(level, config, trainerSource, control);
-                var trainerCompile = new CSharpCompiler().Compile(level, result.TrainerBlock, trainerSource);
+                var trainerCompile = new CSharpCompiler { AllowExtendedGasm = EngineSettings.ExtendedGasm }.Compile(level, result.TrainerBlock, trainerSource);
                 result.TrainerBlock.Compiled = trainerCompile;
                 result.TrainerCompile = trainerCompile;
                 result.TrainerPages = 1 + trainerCompile.Continuations.Count;

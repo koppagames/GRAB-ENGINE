@@ -11,14 +11,34 @@ namespace GrabEngine.Core;
 /// </summary>
 public static class GrabLimits
 {
-    /// <summary>Retail Code Block program limit.</summary>
+    /// <summary>
+    /// Instructions the retail GASM screen keeps in one Code Block. This is an editor
+    /// UI cap: the interpreter stores instructions in a dynamic array, so a loaded
+    /// level runs longer programs. Extended compiles ignore it deliberately.
+    /// </summary>
     public const int MaxInstructions = 150;
 
-    /// <summary>Maximum number of connections on one Code Block (v0.76.1+).</summary>
+    /// <summary>
+    /// Connections the retail GASM screen allows on one Code Block. Also an editor UI
+    /// cap; the runtime keeps connections in a dynamic array.
+    /// </summary>
     public const int MaxConnections = 10;
 
-    /// <summary>Maximum targets one Trigger can connect to.</summary>
+    /// <summary>Registers the retail GASM screen reserves before it stops adding new
+    /// ones. Dynamic in the runtime, which is why custom registers survive a load.</summary>
+    public const int MaxEditorRegisters = 480;
+
+    /// <summary>
+    /// Targets the retail editor's trigger settings screen allows. The .level format
+    /// stores targets as a repeated field and the trigger runtime iterates all of them,
+    /// so this is a screen cap; <see cref="TriggerTargetBudget"/> honours the extended
+    /// setting instead.
+    /// </summary>
     public const int MaxTriggerTargets = 17;
+
+    /// <summary>How many targets a trigger may hold right now.</summary>
+    public static int TriggerTargetBudget =>
+        EngineSettings.ExtendedTriggerTargets ? int.MaxValue : MaxTriggerTargets;
 
     /// <summary>
     /// Connection names in retail levels are four characters (blk1, trg1, lght...).
@@ -96,6 +116,10 @@ public static class GrabLimits
 
             if (n.Kind == NodeKind.GASM && n.Compiled != null)
             {
+                // Extended programs are deliberately emitted for the runtime, which
+                // stores instructions/connections in dynamic arrays. Only the retail
+                // editor UI caps them at 150 / 10; a loaded level still executes it.
+                if (n.Compiled.AllowExtendedLimits) continue;
                 int instructions = n.Compiled.Program.Instructions.Count;
                 if (instructions > MaxInstructions)
                 {

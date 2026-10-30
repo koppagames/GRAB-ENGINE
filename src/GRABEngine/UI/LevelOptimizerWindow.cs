@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -19,7 +20,8 @@ public sealed class LevelOptimizerWindow : Window
     private readonly TextBlock _result = new() { Foreground = Theme.Dim, FontSize = 11, TextWrapping = TextWrapping.Wrap };
     private readonly CheckBox _merge = Theme.Check("Merge adjacent identical cubes", true);
     private readonly CheckBox _mergeMixed = Theme.Check("Merge different block sizes on a shared grid", true);
-    private readonly ComboBox _mixedGrid = Theme.Combo(new[] { "0.25 m", "0.5 m", "1 m", "2 m", "4 m" }, 2);
+    // Free text so any grid works, not just a few presets.
+    private readonly TextBox _mixedGrid = Theme.TextBox("1", height: 24);
     private readonly CheckBox _cull = Theme.Check("Remove fully enclosed blocks", true);
     private readonly CheckBox _duplicates = Theme.Check("Remove exact duplicate blocks", true);
     private readonly CheckBox _degenerate = Theme.Check("Remove zero-size blocks", true);
@@ -122,14 +124,16 @@ public sealed class LevelOptimizerWindow : Window
         right.Children.Add(Theme.SectionHeader("OPTIMISATION"));
         right.Children.Add(_merge);
         right.Children.Add(_mergeMixed);
-        right.Children.Add(Theme.Row("Grid", _mixedGrid, 92));
+        _mixedGrid.Width = 92;
+        _mixedGrid.ToolTip = "Any grid size in metres (0.05 to 32). Smaller is finer and slower; it does not have to be a power of two.";
+        right.Children.Add(Theme.Row("Grid (m)", _mixedGrid, 92));
         right.Children.Add(_cull);
         right.Children.Add(_duplicates);
         right.Children.Add(_degenerate);
         right.Children.Add(_emptyGroups);
         right.Children.Add(_protect);
-        right.Children.Add(Theme.Hint("Mixed-size merging rebuilds identical-material blocks on the selected grid, so a tall terrain column and its cap can become one block. Merging runs before culling, so a solid region can collapse to one large block first. Animated objects, scripts, locked objects and physics groups are never modified."));
-        _mixedGrid.SelectionChanged += (_, _) => { if (_mergeMixed.IsChecked == true) _merge.IsChecked = false; };
+        right.Children.Add(Theme.Hint("Mixed-size merging rebuilds identical-material blocks on the grid you type in — any value from 0.05 m to 32 m, not just the usual 0.5/1/2 — so a tall terrain column and its cap can become one block. Merging runs before culling, so a solid region can collapse to one large block first. A block that would need more than 100,000 grid cells is left alone, so a very fine grid stays fast. Animated objects, scripts, locked objects and physics groups are never modified."));
+        _mixedGrid.TextChanged += (_, _) => { if (_mergeMixed.IsChecked == true) _merge.IsChecked = false; };
         right.Children.Add(_result);
         var note = new TextBlock
         {
@@ -198,7 +202,8 @@ public sealed class LevelOptimizerWindow : Window
         }
         try
         {
-            double grid = _mixedGrid.SelectedIndex switch { 0 => 0.25, 1 => 0.5, 3 => 2.0, 4 => 4.0, _ => 1.0 };
+            double grid = GridValue();
+            _mixedGrid.Text = grid.ToString("0.###", CultureInfo.InvariantCulture);
             var result = LevelOptimizer.Optimize(_level, new LevelOptimizeOptions
             {
                 MergeAdjacentCubes = merge,
@@ -222,6 +227,15 @@ public sealed class LevelOptimizerWindow : Window
             _result.Text = "Optimizer failed: " + ex.Message;
             _result.Foreground = Theme.Error;
         }
+    }
+
+    /// <summary>The typed grid, in metres. Anything unparseable falls back to 1 m.</summary>
+    private double GridValue()
+    {
+        var text = (_mixedGrid.Text ?? "").Trim().Replace(',', '.').Replace("m", "", StringComparison.OrdinalIgnoreCase).Trim();
+        if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double grid) || grid <= 0)
+            grid = 1.0;
+        return Math.Clamp(grid, 0.05, 32.0);
     }
 
     private sealed class IssueRow

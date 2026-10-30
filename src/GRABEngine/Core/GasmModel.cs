@@ -115,6 +115,10 @@ public class GasmCompileResult
     public List<string> GasmText { get; set; } = new();
     public List<Diagnostic> Diagnostics { get; set; } = new();
     public LevelNode? BlockNode { get; set; }
+    /// <summary>True when this program intentionally exceeds the retail editor's
+    /// 150-instruction / 10-connection UI caps. The GASM runtime stores programs
+    /// and registers as dynamic arrays, so a loaded level can execute it.</summary>
+    public bool AllowExtendedLimits { get; set; }
     /// <summary>Extra Code Blocks generated because the program exceeded GRAB's limits.</summary>
     public List<GasmCompileResult> Continuations { get; set; } = new();
     public bool Success => Diagnostics.All(d => d.Severity != DiagnosticSeverity.Error);

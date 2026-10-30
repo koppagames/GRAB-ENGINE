@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -162,7 +162,7 @@ public static class SpeechImporter
             block.Script = script;
             group.Children.Add(block);
             level.RebuildParents();
-            block.Compiled = new CSharpCompiler().Compile(level, block, script);
+            block.Compiled = new CSharpCompiler { AllowExtendedGasm = EngineSettings.ExtendedGasm }.Compile(level, block, script);
             schedulers.Add(block);
             result.Blocks++;
             if (!block.Compiled.Success)
@@ -181,7 +181,7 @@ public static class SpeechImporter
         if (master != null && schedulers.Count > 0)
         {
             var finalIds = level.BuildObjectIds();
-            foreach (var scheduler in schedulers.Take(GrabLimits.MaxTriggerTargets))
+            foreach (var scheduler in schedulers.Take(GrabLimits.TriggerTargetBudget))
             {
                 master.TriggerTargets.Add(new TriggerTarget
                 {

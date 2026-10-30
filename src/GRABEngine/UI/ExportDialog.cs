@@ -108,6 +108,9 @@ public sealed class ExportDialog : Window
         body.Children.Add(_optimizeAnimations);
         body.Children.Add(_trimPrograms);
         body.Children.Add(Theme.Hint("The Release optimiser only applies passes that cannot change register values, control flow, animation timing or gameplay. A verification pass re-reads the exported file before it is reported as successful."));
+        body.Children.Add(Theme.Hint(EngineSettings.ExtendedGasm
+            ? "GASM mode: extended. Every script is one Code Block, even above the retail editor's 150-instruction / 10-connection caps (Tools → Script Compiler)."
+            : "GASM mode: split. Long scripts are spread over continuation Code Blocks inside the retail editor's caps (Tools → Script Compiler)."));
 
         // ---- Output ----
         body.Children.Add(Theme.SectionHeader("OUTPUT"));

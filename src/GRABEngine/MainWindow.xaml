@@ -125,6 +125,8 @@
                 <MenuItem Header="Audio Studio..." Click="AudioStudio_Click"/>
                 <MenuItem Header="Text to Speech..." Click="TextToSpeech_Click"/>
                 <MenuItem Header="Neural Lab..." Click="NeuralLab_Click"/>
+                <MenuItem Header="Pathfinding Studio..." Click="Pathfinding_Click"/>
+                <MenuItem Header="Script Compiler (GASM limits)..." Click="CompilerSettings_Click"/>
                 <Separator/>
                 <MenuItem Header="Search Hierarchy" InputGestureText="Ctrl+F" Click="FocusHierarchySearch_Click"/>
                 <MenuItem Header="Manage Layers..." Click="ManageLayers_Click"/>
@@ -198,7 +200,8 @@
                     </Border>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
-                    <Button Content="Animation" Padding="10,3" Click="Animation_Click" ToolTip="Open the animation timeline (also Window → Animation)"/>
+                    <Button Content="Pathfind" Padding="10,3" Click="Pathfinding_Click" ToolTip="Open Pathfinding Studio — pick a finder and target, tune the agent, and preview or play the route"/>
+                    <Button Content="Animation" Padding="10,3" Margin="4,0,0,0" Click="Animation_Click" ToolTip="Open the animation timeline (also Window → Animation)"/>
                     <Button Content="Compile All" Padding="10,3" Margin="4,0,0,0" Click="CompileAll_Click" ToolTip="Compile every Code Block (F7)"/>
                     <Button Content="Export .level" Padding="10,3" Margin="4,0" Style="{StaticResource AccentButton}" Click="ExportLevel_Click"/>
                     <Button Content="Install to GRAB" Padding="10,3" Click="InstallLevel_Click"/>

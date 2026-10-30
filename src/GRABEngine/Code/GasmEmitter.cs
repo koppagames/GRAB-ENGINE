@@ -31,16 +31,18 @@ public sealed class GasmEmitter
     private GasmConnection? _lobby;
     private int _tempCounter;
     private int _labelCounter;
+    private readonly bool _allowLarge;
     private readonly Stack<int> _freeTemps = new();
 
     /// <summary>Current C# source line, written onto every emitted instruction.
     /// Play mode uses it for breakpoints and the execution-line marker.</summary>
     public int SourceLine { get; set; }
 
-    public GasmEmitter(IReadOnlyDictionary<LevelNode, ulong> objectIds, List<Diagnostic> diags)
+    public GasmEmitter(IReadOnlyDictionary<LevelNode, ulong> objectIds, List<Diagnostic> diags, bool allowLarge = false)
     {
         ObjectIds = objectIds;
         Diagnostics = diags;
+        _allowLarge = allowLarge;
         for (int i = 0; i < 8; i++) Program.WorkingRegisters.Add(new GasmRegister { Name = "R" + i });
     }
 
@@ -56,7 +58,7 @@ public sealed class GasmEmitter
     {
         if (_freeTemps.Count > 0) return _freeTemps.Pop();
         Program.WorkingRegisters.Add(new GasmRegister { Name = "__t" + _tempCounter++ });
-        if (Program.WorkingRegisters.Count > 480)
+        if (!_allowLarge && Program.WorkingRegisters.Count > 480)
         {
             Diagnostics.Add(new Diagnostic { Severity = DiagnosticSeverity.Error, Message = "Program needs more than 480 registers. Simplify the script.", File = "Script.cs" });
         }

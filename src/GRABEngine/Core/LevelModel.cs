@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json.Serialization;
@@ -263,7 +263,10 @@ public class LevelNode
     public Col Color1 { get; set; } = new(0.72f, 0.72f, 0.72f, 1f);
     public Col Color2 { get; set; } = new(0.15f, 0.15f, 0.15f, 1f);
     public Vec3 GradientDirection { get; set; } = new(0, 1, 0);
-    public float SpecularBrightness { get; set; } = 3f;
+    // GRAB's block inspector has a Rendering dropdown: Default, Specularity, Neon, ...
+    // A block is only "Specularity" when this is above zero, so new blocks start at 0
+    // (Default) exactly like a block placed in the real editor.
+    public float SpecularBrightness { get; set; } = 0f;
     public bool IsNeon { get; set; }
     public bool IsTransparent { get; set; }
     public bool IsGradient { get; set; }
@@ -488,6 +491,9 @@ public class GrabLevel
     /// <summary>Persistent Neural Lab graph, bindings and trained weights (editor-only).</summary>
     public NeuralLabConfig? NeuralLab { get; set; }
 
+    /// <summary>Pathfinding Studio selection, agent tuning and follow settings (editor-only).</summary>
+    public PathfindingSettings Pathfinding { get; set; } = new();
+
     /// <summary>Editor-only layers (visibility, locking and organisation).</summary>
     public List<EditorLayer> EditorLayers { get; set; } = new();
     public string ActiveLayerId { get; set; } = DefaultLayerId;
@@ -682,6 +688,31 @@ public class GrabLevel
         });
         level.Nodes.Add(start);
         level.Nodes.Add(finish);
+        level.RebuildParents();
+        level.EnsureNames();
+        return level;
+    }
+
+    /// <summary>
+    /// A brand-new level: a Start point and a Finish point, nothing else. This is what
+    /// Ctrl+N and File > New create, so an empty level really is empty — no showcase
+    /// blocks, floor, light or particle emitter to delete first.
+    /// </summary>
+    public static GrabLevel CreateBlank()
+    {
+        var level = new GrabLevel { Title = "My Level", Creators = "GRAB ENGINE", Description = "Made with GRAB ENGINE" };
+        level.EditorLayers.Add(new EditorLayer { Id = DefaultLayerId, Name = "Default", Color = "#4A90D9" });
+        // Start faces -Z, the direction Play mode aims the camera, so a new level already
+        // looks "forwards" before anything is placed.
+        level.Nodes.Add(new LevelNode
+        {
+            Name = "Start", Kind = NodeKind.Start, Position = new Vec3(0, 0, 4), Radius = 0.5f,
+            Rotation = Quat.FromEulerDegrees(new Vec3(0, 180, 0))
+        });
+        level.Nodes.Add(new LevelNode
+        {
+            Name = "Finish", Kind = NodeKind.Finish, Position = new Vec3(0, 0, -4), Radius = 1f
+        });
         level.RebuildParents();
         level.EnsureNames();
         return level;

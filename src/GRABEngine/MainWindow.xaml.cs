@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -61,6 +61,8 @@ public partial class MainWindow : Window
     private bool _syncingTerrainUi;
     private readonly BlockPaletteState _blockPalette = BlockPalette.Load();
     private DocsWindow? _docsWindow;
+    private PathfindingWindow? _pathfindingWindow;
+    private PathfinderRuntime? _pathRuntime;
     private AnimationPanel? _animationPanel;
     private PrefabInfo? _stampPrefab;
     private string _lastGlbPath = "";
@@ -137,6 +139,7 @@ public partial class MainWindow : Window
         Log("Block brush: B, then Fill / Replace / Erase / Line / Box / Sphere");
         Log("Draw structures: G, then drag a footprint or draw a custom shape");
         Log("Measure: M  •  Prefab stamp: choose a prefab under Prefabs → Stamp Prefab, then P");
+        Log("Pathfinding: Tools → Pathfinding Studio — pick a finder and target, then play");
         var args = Environment.GetCommandLineArgs();
         if (args.Length > 1 && File.Exists(args[1])) OpenFile(args[1]);
         RefreshPrefabMenu();
@@ -155,6 +158,7 @@ public partial class MainWindow : Window
         _suppressHistory = true;
         try
         {
+            ClosePathfindingWindow();
             _level = level;
             _projectPath = projectPath;
             _selected = null;
@@ -531,6 +535,49 @@ public partial class MainWindow : Window
         palette.ShowDialog();
     }
     private void AudioStudio_Click(object sender, RoutedEventArgs e) => OpenAudioStudio(0);
+
+    private void Pathfinding_Click(object sender, RoutedEventArgs e)
+    {
+        if (_playing) StopPlay();
+        if (_pathfindingWindow != null)
+        {
+            _pathfindingWindow.Activate();
+            return;
+        }
+        var window = new PathfindingWindow(this, _level, () => _selected,
+            (path, waypoints) => Scene.ShowPath(path, waypoints),
+            () => MarkDirty(null, "Pathfinding settings"),
+            () => StartPlay(),
+            block =>
+            {
+                Scene.SetLevel(_level, frame: false);
+                BuildHierarchy();
+                SelectNode(block);
+                RefreshInspector();
+                MarkDirty("path-bake", "Baked path Code Block");
+                Log("Pathfinding: baked route into Code Block '" + block.DisplayName + "'");
+                StatusText.Text = "Path baked to Code Block — export the level to use it in GRAB";
+            });
+        _pathfindingWindow = window;
+        window.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_pathfindingWindow, window)) _pathfindingWindow = null;
+            Scene.ClearPath();
+        };
+        window.Show();
+        Log("Pathfinding Studio opened — pick a Finder and Target, then Find Path");
+    }
+
+    private void ClosePathfindingWindow()
+    {
+        var window = _pathfindingWindow;
+        _pathfindingWindow = null;
+        if (window != null)
+        {
+            try { window.Close(); } catch { }
+        }
+        Scene.ClearPath();
+    }
 
     private void NeuralLab_Click(object sender, RoutedEventArgs e)
     {
@@ -1334,7 +1381,7 @@ public partial class MainWindow : Window
                 node.Compiled = null;
                 continue;
             }
-            var result = new CSharpCompiler().Compile(_level, node, node.Script);
+            var result = new CSharpCompiler { AllowExtendedGasm = EngineSettings.ExtendedGasm }.Compile(_level, node, node.Script);
             foreach (var d in result.Diagnostics)
             {
                 d.File = node.DisplayName + ".cs";
@@ -1445,6 +1492,7 @@ public partial class MainWindow : Window
     private void StartPlay()
     {
         if (_playing) { StopPlay(); return; }
+        ClosePathfindingWindow();
         _animationPanel?.Deactivate();
         var (errors, _) = CompileAll();
         if (errors > 0)
@@ -1459,6 +1507,26 @@ public partial class MainWindow : Window
         _playSelectedIds = _selection.Select(n => n.EditorId).ToList();
         _play = new PlaySession(_level);
         foreach (var pair in _breakpointsByNode) _play.SetBreakpoints(pair.Key, pair.Value);
+        _pathRuntime = null;
+        var pathSettings = _level.Pathfinding ??= new PathfindingSettings();
+        if (pathSettings.AutoFollowInPlay)
+        {
+            var finder = _level.FindByEditorId(pathSettings.FinderId);
+            var target = _level.FindByEditorId(pathSettings.TargetId);
+            if (finder != null && target != null && !ReferenceEquals(finder, target))
+            {
+                try
+                {
+                    _pathRuntime = new PathfinderRuntime(_level, pathSettings, finder, target);
+                    Log($"Pathfinding active: {finder.DisplayName} → {target.DisplayName} ({_pathRuntime.Path.Message})");
+                    if (pathSettings.ShowPathInPlay) Scene.ShowPath(_pathRuntime.Path, pathSettings.ShowWaypoints);
+                }
+                catch (Exception ex)
+                {
+                    Log("Pathfinding could not start: " + ex.Message);
+                }
+            }
+        }
         _playAudio = new GameAudio(_level);
         _play.SoundTarget += (sound, mode) => _playAudio?.Trigger(sound, mode);
         _playAudio.Start(_play.PlayerPosition);
@@ -1535,6 +1603,8 @@ public partial class MainWindow : Window
         if (!_playing) return;
         _playTimer.Stop();
         _playClock.Stop();
+        _pathRuntime = null;
+        Scene.ClearPath();
         _playing = false;
         _paused = false;
         LiveBadge.Visibility = Visibility.Collapsed;
@@ -1603,6 +1673,14 @@ public partial class MainWindow : Window
         _play.DesiredVelocity = move;
 
         _play.Step(dt);
+        if (_pathRuntime != null)
+        {
+            _pathRuntime.Update(dt);
+            var ps = _level.Pathfinding;
+            if (ps != null && ps.ShowPathInPlay)
+                Scene.ShowPath(_pathRuntime.Path, ps.ShowWaypoints);
+            else Scene.ClearPath();
+        }
         _playAudio?.UpdateListener(_play.PlayerPosition);
         if (_play.AmbienceDirty) Scene.SetAmbience(_level.Ambience);
         Scene.Refresh();
@@ -1643,8 +1721,10 @@ public partial class MainWindow : Window
     {
         if (_playing) StopPlay();
         if (!ConfirmDiscard()) return;
-        LoadLevel(GrabLevel.CreateDefault(), null);
-        Log("New level created");
+        // A new level starts as just a Start and a Finish point; nothing has to be deleted
+        // before building.
+        LoadLevel(GrabLevel.CreateBlank(), null);
+        Log("New level created (Start + Finish)");
     }
 
     private bool ConfirmDiscard()
@@ -3333,7 +3413,28 @@ public partial class MainWindow : Window
     private void Play_Click(object sender, RoutedEventArgs e) => StartPlay();
     private void Pause_Click(object sender, RoutedEventArgs e) => PausePlay();
     private void Stop_Click(object sender, RoutedEventArgs e) => StopPlay();
+    /// <summary>
+    /// A generated script has to obey whichever GASM mode the editor is in: extended
+    /// mode means one Code Block with no continuation pages, split mode means every
+    /// page stays inside the retail editor's caps.
+    /// </summary>
+    private static bool FitsActiveGasmMode(IReadOnlyList<GasmCompileResult> pages) =>
+        EngineSettings.ExtendedGasm
+            ? pages.Count > 0 && pages.All(p => p.AllowExtendedLimits && p.Continuations.Count == 0)
+            : pages.All(p => p.Program.Instructions.Count <= GrabLimits.MaxInstructions &&
+                             p.Connections.Count <= GrabLimits.MaxConnections);
+
     private void CompileAll_Click(object sender, RoutedEventArgs e) => CompileAll();
+
+    private void CompilerSettings_Click(object sender, RoutedEventArgs e)
+    {
+        if (!CompilerSettingsWindow.Show(this)) return;
+        var (errors, warnings) = CompileAll();
+        Log(EngineSettings.ExtendedGasm
+            ? "Script compiler: extended GASM. Scripts are exported as one Code Block, above the retail editor's 150 / 10 / 480 caps."
+            : "Script compiler: split GASM. Long scripts are spread over continuation Code Blocks inside the editor caps.");
+        Log($"Recompiled every script ({errors} error(s), {warnings} warning(s)).");
+    }
 
     private void Ambience_Click(object sender, RoutedEventArgs e) => SelectNode(null);
 
@@ -4523,6 +4624,34 @@ public class LanguageTest : CodeBlock
             Check("optimizer merges different block heights on the grid",
                 optResult.MergedBlocks > 0 && optAfter == 1,
                 $"merged {optResult.MergedBlocks}, {optAfter} block(s) left");
+            // The optimizer grid is free text now, so an odd size such as 0.75 m has to merge
+            // exactly as well as the usual 1 m.
+            var oddGridLevel = new GrabLevel();
+            LevelNode OddBlock(double x, double y, double z, double sx, double sy, double sz)
+            {
+                var node = new LevelNode
+                {
+                    Kind = NodeKind.Static, Shape = ShapeInfo.Cube, Material = 8,
+                    Position = new Vec3((float)x, (float)y, (float)z),
+                    Scale = new Vec3((float)sx, (float)sy, (float)sz)
+                };
+                oddGridLevel.AddNode(node);
+                return node;
+            }
+            OddBlock(0.375, 0.375, 0.375, 0.75, 0.75, 0.75);
+            OddBlock(0.375, 1.5, 0.375, 0.75, 1.5, 0.75);
+            oddGridLevel.EnsureNames();
+            var oddGridResult = LevelOptimizer.Optimize(oddGridLevel, new LevelOptimizeOptions
+            {
+                MergeAdjacentCubes = false, MergeMixedSizes = true, MixedSizeGrid = 0.75,
+                CullHiddenBlocks = false, RemoveDuplicateBlocks = false, RemoveEmptyGroups = false
+            });
+            var oddMerged = oddGridLevel.AllNodes().Where(n => n.Kind == NodeKind.Static).ToList();
+            Check("optimizer accepts any typed grid size",
+                oddGridResult.MergedBlocks > 0 && oddMerged.Count == 1 &&
+                Math.Abs(oddMerged[0].Scale.Y - 2.25f) < 0.001f,
+                $"merged {oddGridResult.MergedBlocks}, {oddMerged.Count} block(s), height {oddMerged.FirstOrDefault()?.Scale.Y:0.###}");
+
             var degenerateLevel = new GrabLevel();
             degenerateLevel.AddNode(new LevelNode
             {
@@ -5166,6 +5295,372 @@ public class ParamsTest : CodeBlock
             var releaseRead = LevelIO.Load(releaseSettings.Path);
             Check("release level keeps every object", releaseRead.AllNodes().Count() == _level.AllNodes().Count(), $"{releaseRead.AllNodes().Count()} vs {_level.AllNodes().Count()}");
 
+            // GRAB's block inspector has a Rendering list: Default, Specularity, Neon, ...
+            // Exporting must hand the game Default shading, not Specularity on every block.
+            var shadeLevel = new GrabLevel { Title = "Shading" };
+            var shadeBlock = new LevelNode { Kind = NodeKind.Static, Name = "Shade Block", Position = new Vec3(0, 0.5f, 0), Scale = Vec3.One, Material = 8 };
+            shadeLevel.AddNode(shadeBlock);
+            var shadeBack = LevelIO.Read(LevelIO.Write(shadeLevel)).AllNodes().FirstOrDefault(n => n.Kind == NodeKind.Static);
+            Check("blocks export with GRAB's Default shading, not Specularity",
+                shadeBlock.SpecularBrightness == 0f && shadeBack != null && shadeBack.SpecularBrightness == 0f,
+                $"model {shadeBlock.SpecularBrightness:0.##}, exported {shadeBack?.SpecularBrightness.ToString("0.##") ?? "missing"}");
+            // Projects saved by older builds carry the old 3.0 default on every block.
+            shadeBlock.SpecularBrightness = 3f;
+            var migrated = ProjectIO.Deserialize(ProjectIO.Serialize(shadeLevel)).AllNodes().FirstOrDefault(n => n.Kind == NodeKind.Static);
+            Check("old projects load with Default shading instead of Specularity",
+                migrated != null && migrated.SpecularBrightness == 0f, $"{migrated?.SpecularBrightness.ToString("0.##") ?? "missing"}");
+
+            // Ctrl+N / File > New must give a genuinely empty level: a Start and a Finish.
+            var blank = GrabLevel.CreateBlank();
+            Check("new levels contain only a Start and a Finish",
+                blank.AllNodes().Count() == 2 &&
+                blank.AllNodes().Count(n => n.Kind == NodeKind.Start) == 1 &&
+                blank.AllNodes().Count(n => n.Kind == NodeKind.Finish) == 1,
+                string.Join(", ", blank.AllNodes().Select(n => n.Kind + ":" + n.Name)));
+            var blankRound = LevelIO.Read(LevelIO.Write(blank));
+            Check("a new level exports and reopens with both points",
+                blankRound.AllNodes().Count() == 2 && blankRound.DefaultSpawnPointId != 0,
+                $"{blankRound.AllNodes().Count()} object(s), spawn {blankRound.DefaultSpawnPointId}");
+
+            var pathLevel = new GrabLevel { Title = "Pathfinding Selftest" };
+            pathLevel.AddNode(new LevelNode
+            {
+                Kind = NodeKind.Static, Name = "Path Floor", Position = new Vec3(0, -0.5f, 0),
+                Scale = new Vec3(14, 1, 12), Material = 8
+            });
+            // A wall with a gap around its north edge. The shortest route is not a
+            // straight line, and it must never pass through the wall volume.
+            pathLevel.AddNode(new LevelNode
+            {
+                Kind = NodeKind.Static, Name = "Path Wall", Position = new Vec3(0, 1, 0),
+                Scale = new Vec3(1, 2, 4), Material = 8
+            });
+            var pathFinder = new LevelNode { Kind = NodeKind.Static, Name = "Path Finder", Position = new Vec3(-4, 0.5f, 0), Scale = Vec3.One, Material = 8 };
+            var pathTarget = new LevelNode { Kind = NodeKind.Static, Name = "Path Target", Position = new Vec3(4, 0.5f, 0), Scale = Vec3.One, Material = 8 };
+            pathLevel.AddNode(pathFinder);
+            pathLevel.AddNode(pathTarget);
+            var pathSettings = new PathfindingSettings { CellSize = 0.5f, AgentRadius = 0.35f, AgentHeight = 1.8f, MaxStepHeight = 0.75f };
+            var path = Pathfinder.Find(pathLevel, pathSettings, pathFinder, pathTarget);
+            Check("A* finds a route around a wall", path.Success && path.Length > 8.1f && path.Points.Count >= 2,
+                $"{(path.Success ? path.Length.ToString("0.00") + " m" : path.Message)}, {path.Points.Count} waypoint(s), start {path.StartCell}, goal {path.GoalCell}, visited {path.Visited}; {path.Debug}");
+            Check("A* route never enters the wall volume", path.Success && path.Points.All(p => Math.Abs(p.X) > 0.75f || Math.Abs(p.Z) > 2.3f),
+                string.Join(" | ", path.Points.Take(6)));
+            Check("A* path is collision-free on the grid", path.Success && path.CellSize > 0, path.CellSize.ToString("0.##"));
+
+            var bakeLevel = new GrabLevel { Title = "Path Export" };
+            bakeLevel.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "Bake Floor", Position = new Vec3(0, -0.5f, 0), Scale = new Vec3(14, 1, 8), Material = 8 });
+            var bakeFinder = new LevelNode { Kind = NodeKind.Static, Name = "Bake Finder", Position = new Vec3(-4, 0.5f, 0), Scale = Vec3.One, Material = 8 };
+            var bakeTarget = new LevelNode { Kind = NodeKind.Static, Name = "Bake Target", Position = new Vec3(4, 0.5f, 0), Scale = Vec3.One, Material = 8 };
+            bakeLevel.AddNode(bakeFinder);
+            bakeLevel.AddNode(bakeTarget);
+            var bakeSettings = new PathfindingSettings { CellSize = 0.5f, AgentRadius = 0.3f, Speed = 6f };
+            var bakePath = Pathfinder.Find(bakeLevel, bakeSettings, bakeFinder, bakeTarget);
+            var baked = PathfindingExporter.Bake(bakeLevel, bakeSettings, bakeFinder, bakePath);
+            Check("pathfinding bakes a real compiled Code Block", baked.Success && baked.Block?.Compiled != null,
+                baked.Message.Replace("\n", " | "));
+            // Export before Play moves the editor copies, so the round-trip test
+            // starts from the same scene a user would export.
+            var exportedBytes = LevelIO.Write(bakeLevel);
+            var bakePlay = new PlaySession(bakeLevel);
+            for (int i = 0; i < 120; i++) bakePlay.Step(1f / 60f);
+            Check("baked path Code Block moves the finder in Play mode", bakeFinder.WorldPosition.X > -1f,
+                $"x={bakeFinder.WorldPosition.X:0.00}");
+            var exportedLevel = LevelIO.Read(exportedBytes);
+            var exportedBlock = exportedLevel.AllNodes().FirstOrDefault(n => n.Kind == NodeKind.GASM);
+            Check("exported .level carries the baked GASM program", exportedBlock?.ImportedProgram?.Instructions.Count > 0,
+                $"{exportedBlock?.ImportedProgram?.Instructions.Count ?? 0} instructions, {exportedBlock?.ImportedConnections?.Count ?? 0} connections");
+            // Static block names are not stored in GRAB .level files; find the
+            // moving block by its exported position instead.
+            var exportedFinder = exportedLevel.AllNodes().FirstOrDefault(n =>
+                n.Kind == NodeKind.Static && n.Position.X < -3f && n.Position.Y > 0f);
+            var bakeExportPlay = new PlaySession(exportedLevel);
+            for (int i = 0; i < 120; i++) bakeExportPlay.Step(1f / 60f);
+            Check("exported .level runs the baked route", exportedFinder != null && exportedFinder.WorldPosition.X > -1f,
+                $"x={exportedFinder?.WorldPosition.X:0.00}; statics=" + string.Join(" | ", exportedLevel.AllNodes()
+                    .Where(n => n.Kind == NodeKind.Static).Select(n => $"{n.Name}@{n.Position}")));
+
+            var liveNavLevel = new GrabLevel { Title = "Live Nav" };
+            liveNavLevel.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "Live Floor", Position = new Vec3(0, -0.5f, 0), Scale = new Vec3(16, 1, 16), Material = 8 });
+            var navWall = new LevelNode { Kind = NodeKind.Static, Name = "Live Wall", Position = new Vec3(2, 0.5f, 2), Scale = new Vec3(1, 1, 1), Material = 8 };
+            var navFinder = new LevelNode { Kind = NodeKind.Static, Name = "Live Finder", Position = new Vec3(-4, 0.5f, -4), Scale = Vec3.One, Material = 8 };
+            var navTarget = new LevelNode { Kind = NodeKind.Static, Name = "Live Target", Position = new Vec3(4, 0.5f, 4), Scale = Vec3.One, Material = 8 };
+            liveNavLevel.AddNode(navWall);
+            liveNavLevel.AddNode(navFinder);
+            liveNavLevel.AddNode(navTarget);
+            // A picket of extra obstacles, so the live planner really has to reference
+            // more objects than the retail editor's 10-connection cap allows.
+            for (int i = 0; i < 12; i++)
+                liveNavLevel.AddNode(new LevelNode
+                {
+                    Kind = NodeKind.Static, Name = "Picket " + i,
+                    Position = new Vec3(7, 0.5f, -5.5f + i), Scale = new Vec3(0.5f, 1, 0.5f), Material = 8
+                });
+            var liveNavSettings = new PathfindingSettings { CellSize = 0.5f, AgentRadius = 0.35f, AgentHeight = 1.8f, Speed = 5f, RepathInterval = 0.15f };
+            var liveNav = PathfindingExporter.BakeRuntime(liveNavLevel, liveNavSettings, navFinder, navTarget);
+            if (!liveNav.Success)
+                try { File.WriteAllText(Path.Combine(Path.GetTempPath(), "grabengine_live_nav.cs"), liveNav.Source); } catch { }
+            Check("live nav bakes an extended GASM Code Block", liveNav.Success && liveNav.Compile?.AllowExtendedLimits == true,
+                liveNav.Message.Replace("\n", " | "));
+            Check("live nav exceeds the editor UI caps without splitting",
+                (liveNav.Compile?.Program.Instructions.Count ?? 0) > GrabLimits.MaxInstructions &&
+                (liveNav.Compile?.Connections.Count ?? 0) > GrabLimits.MaxConnections,
+                $"{liveNav.Compile?.Program.Instructions.Count ?? 0} instructions, {liveNav.Compile?.Connections.Count ?? 0} connections");
+            var livePlay = new PlaySession(liveNavLevel);
+            for (int i = 0; i < 90; i++) livePlay.Step(1f / 60f);
+            navWall.Position = new Vec3(0, 0.5f, 0);
+            navTarget.Position = new Vec3(4, 0.5f, 1);
+            for (int i = 0; i < 240; i++) livePlay.Step(1f / 60f);
+            Check("live nav re-plans around a moved wall and moving target",
+                (navFinder.WorldPosition - navTarget.WorldPosition).Length < 1.8f,
+                $"finder {navFinder.WorldPosition}, target {navTarget.WorldPosition}");
+            var liveBytes = LevelIO.Write(liveNavLevel);
+            var liveRead = LevelIO.Read(liveBytes);
+            var liveBlock = liveRead.AllNodes().FirstOrDefault(n => n.Kind == NodeKind.GASM);
+            Check("exported live nav keeps its extended GASM", liveBlock?.ImportedProgram?.Instructions.Count > GrabLimits.MaxInstructions,
+                $"{liveBlock?.ImportedProgram?.Instructions.Count ?? 0} instructions");
+
+            // Diagnostic: does a plain Z write move a static block in the editor VM?
+            var zLevel = new GrabLevel { Title = "Z Write" };
+            var zMover = new LevelNode { Kind = NodeKind.Static, Name = "Z Mover", Position = new Vec3(0, 0.5f, 0), Scale = Vec3.One, Material = 8 };
+            zLevel.AddNode(zMover);
+            var zScript = @"using Grab;
+public class ZMove : CodeBlock
+{
+    GameObject mover = GameObject.Find(""Z Mover"");
+    void Update()
+    {
+        mover.Position.Z = mover.Position.Z + 0.1f;
+    }
+}";
+            var zBlock = new LevelNode { Kind = NodeKind.GASM, Name = "Z Block", Position = new Vec3(0, 2, 0), StartActive = true, Script = zScript };
+            zLevel.AddNode(zBlock);
+            zBlock.Compiled = new CSharpCompiler().Compile(zLevel, zBlock, zScript);
+            var zPlay = new PlaySession(zLevel);
+            for (int i = 0; i < 10; i++) zPlay.Step(1f / 60f);
+            Check("plain Z writes move a block in the VM", zMover.WorldPosition.Z > 0.5f,
+                $"z={zMover.WorldPosition.Z:0.00} ok={zBlock.Compiled?.Success} msgs={string.Join(";", zPlay.Messages)}");
+
+            // A target directly behind a wall must be reached by following the wall, not by
+            // pushing into it (the reported "gets stuck against the wall" case).
+            var acrossLevel = new GrabLevel { Title = "Across Wall" };
+            acrossLevel.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "Across Floor", Position = new Vec3(0, -0.5f, 0), Scale = new Vec3(24, 1, 24), Material = 8 });
+            acrossLevel.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "Across Wall", Position = new Vec3(0, 1.5f, 0), Scale = new Vec3(0.5f, 3, 6), Material = 8 });
+            var acrossFinder = new LevelNode { Kind = NodeKind.Static, Name = "Across Finder", Position = new Vec3(-4, 0.5f, 0), Scale = Vec3.One, Material = 8 };
+            var acrossTarget = new LevelNode { Kind = NodeKind.Static, Name = "Across Target", Position = new Vec3(4, 0.5f, 0), Scale = Vec3.One, Material = 8 };
+            acrossLevel.AddNode(acrossFinder);
+            acrossLevel.AddNode(acrossTarget);
+            var acrossSettings = new PathfindingSettings { CellSize = 0.5f, AgentRadius = 0.35f, AgentHeight = 1.8f, Speed = 4f, BlockingObjects = 8 };
+            var acrossBake = PathfindingExporter.BakeRuntime(acrossLevel, acrossSettings, acrossFinder, acrossTarget);
+            Check("live nav bakes a route straight through a blocking wall", acrossBake.Success,
+                acrossBake.Message.Replace(Environment.NewLine, " | "));
+            var acrossPlay = new PlaySession(acrossLevel);
+            for (int i = 0; i < 900; i++) acrossPlay.Step(1f / 60f);
+            Check("live planner follows a wall to a target directly behind it",
+                (acrossFinder.WorldPosition - acrossTarget.WorldPosition).Length < 1.8f,
+                $"finder {acrossFinder.WorldPosition}, target {acrossTarget.WorldPosition}");
+            Check("wall-following never steps inside the wall",
+                Math.Abs(acrossFinder.WorldPosition.X) > 0.4f || Math.Abs(acrossFinder.WorldPosition.Z) > 3.1f,
+                $"final {acrossFinder.WorldPosition}");
+
+            // A long wall with the target beyond ONE of its ends: the planner must follow
+            // the face to that end and round it, not walk to the far end, and not reverse
+            // half-way (the reported "runs the whole wall the wrong way" case).
+            foreach (var endSign in new[] { 1f, -1f })
+            {
+                var railLevel = new GrabLevel { Title = "Long Wall" };
+                railLevel.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "Rail Floor", Position = new Vec3(0, -0.5f, 0), Scale = new Vec3(40, 1, 26), Material = 8 });
+                railLevel.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "Rail Wall", Position = new Vec3(0, 1f, 0), Scale = new Vec3(12, 2, 1), Material = 8 });
+                // Finder below the middle of the wall, target past the chosen end, on the far side.
+                var railFinder = new LevelNode { Kind = NodeKind.Static, Name = "Rail Finder", Position = new Vec3(0, 0.5f, 2f), Scale = Vec3.One, Material = 8 };
+                var railTarget = new LevelNode { Kind = NodeKind.Static, Name = "Rail Target", Position = new Vec3(endSign * 5.5f, 0.5f, -3f), Scale = Vec3.One, Material = 8 };
+                railLevel.AddNode(railFinder);
+                railLevel.AddNode(railTarget);
+                var railSettings = new PathfindingSettings { CellSize = 0.5f, AgentRadius = 0.35f, AgentHeight = 1.8f, Speed = 4f, BlockingObjects = 8 };
+                var railBake = PathfindingExporter.BakeRuntime(railLevel, railSettings, railFinder, railTarget);
+                Check($"long-wall planner bakes ({endSign:0} end)", railBake.Success, railBake.Message.Replace(Environment.NewLine, " | "));
+                var railPlay = new PlaySession(railLevel);
+                float worstOpposite = 0f;
+                bool enteredWall = false;
+                for (int f = 0; f < 1200; f++)
+                {
+                    railPlay.Step(1f / 60f);
+                    float x = railFinder.WorldPosition.X;
+                    // How far the finder travelled the wrong way (towards the far end).
+                    if (-x * endSign > worstOpposite) worstOpposite = -x * endSign;
+                    // Wall half depth is 0.5 and the agent radius 0.35, so a legal centre never
+                    // comes closer than 0.85; anything inside that is real penetration.
+                    if (Math.Abs(x) < 5.9f && Math.Abs(railFinder.WorldPosition.Z) < 0.8f) enteredWall = true;
+                }
+                Check($"long wall is followed to the near end and rounded ({endSign:0} end)",
+                    (railFinder.WorldPosition - railTarget.WorldPosition).Length < 1.8f && !enteredWall,
+                    $"finder {railFinder.WorldPosition}, target {railTarget.WorldPosition}, enteredWall={enteredWall}");
+                Check($"wall-following never reverses along the face ({endSign:0} end)",
+                    worstOpposite < 1.6f,
+                    $"went {worstOpposite:0.00} m the wrong way along the wall");
+            }
+
+            // An L-shaped corner: the near end is walled off, so the planner has to give up
+            // on that side and walk the wall around the other way instead of jittering.
+            var lLevel = new GrabLevel { Title = "L Corner" };
+            lLevel.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "L Floor", Position = new Vec3(0, -0.5f, 0), Scale = new Vec3(40, 1, 26), Material = 8 });
+            lLevel.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "L Wall", Position = new Vec3(0, 1f, 0), Scale = new Vec3(12, 2, 1), Material = 8 });
+            lLevel.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "L Cross", Position = new Vec3(6, 1f, 2f), Scale = new Vec3(1, 2, 5), Material = 8 });
+            var lFinder = new LevelNode { Kind = NodeKind.Static, Name = "L Finder", Position = new Vec3(0, 0.5f, 2f), Scale = Vec3.One, Material = 8 };
+            var lTarget = new LevelNode { Kind = NodeKind.Static, Name = "L Target", Position = new Vec3(3, 0.5f, -3f), Scale = Vec3.One, Material = 8 };
+            lLevel.AddNode(lFinder);
+            lLevel.AddNode(lTarget);
+            var lBake = PathfindingExporter.BakeRuntime(lLevel, new PathfindingSettings { CellSize = 0.5f, AgentRadius = 0.35f, AgentHeight = 1.8f, Speed = 4f, BlockingObjects = 8 }, lFinder, lTarget);
+            Check("L-corner planner bakes", lBake.Success, lBake.Message.Replace(Environment.NewLine, " | "));
+            var lPlay = new PlaySession(lLevel);
+            for (int f = 0; f < 1800; f++)
+            {
+                lPlay.Step(1f / 60f);
+            }
+            Check("L-corner route reaches the target", (lFinder.WorldPosition - lTarget.WorldPosition).Length < 1.8f,
+                $"finder {lFinder.WorldPosition}, target {lTarget.WorldPosition}");
+
+            // The blocking-object budget is a setting, not a constant: every watched wall is
+            // one more connection, and GRAB does not cap those at runtime.
+            var wideLevel = new GrabLevel { Title = "Wide Nav" };
+            wideLevel.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "Wide Floor", Position = new Vec3(0, -0.5f, 0), Scale = new Vec3(40, 1, 40), Material = 8 });
+            var wideFinder = new LevelNode { Kind = NodeKind.Static, Name = "Wide Finder", Position = new Vec3(-6, 0.5f, 0), Scale = Vec3.One, Material = 8 };
+            var wideTarget = new LevelNode { Kind = NodeKind.Static, Name = "Wide Target", Position = new Vec3(6, 0.5f, 0), Scale = Vec3.One, Material = 8 };
+            wideLevel.AddNode(wideFinder);
+            wideLevel.AddNode(wideTarget);
+            for (int i = 0; i < 45; i++)
+                wideLevel.AddNode(new LevelNode
+                {
+                    Kind = NodeKind.Static, Name = "Post " + i,
+                    Position = new Vec3(-11 + i * 0.5f, 0.5f, 5), Scale = new Vec3(0.5f, 1, 0.5f), Material = 8
+                });
+            var wideSettings = new PathfindingSettings { CellSize = 0.5f, AgentRadius = 0.3f, AgentHeight = 1.8f, BlockingObjects = 40 };
+            var wide = PathfindingExporter.BakeRuntime(wideLevel, wideSettings, wideFinder, wideTarget);
+            Check("live nav watches the configured number of blockers",
+                wide.Success && wide.Compile != null && wide.Compile.Connections.Count == 42,
+                $"{wide.Compile?.Connections.Count ?? 0} connections for {wideSettings.BlockingObjects} blockers");
+            Check("live nav stays one block at 40 blockers",
+                wide.Compile?.AllowExtendedLimits == true && wide.Compile.Continuations.Count == 0,
+                $"{wide.Compile?.Program.Instructions.Count ?? 0} instructions, {wide.Compile?.Continuations.Count ?? -1} continuation(s)");
+            Check("per-wall export cost stays bounded", wide.Compile != null &&
+                wide.Compile.Program.Instructions.Count / Math.Max(1, wideSettings.BlockingObjects) < 220,
+                wide.Compile == null ? "no program" : $"{wide.Compile.Program.Instructions.Count} instructions");
+
+            // Navmesh overlay data only exists when the toggle is on.
+            var navMeshSettings = new PathfindingSettings { CellSize = 0.5f, AgentRadius = 0.35f, AgentHeight = 1.8f, ShowNavMesh = true, BlockingObjects = 8 };
+            var navMeshPath = Pathfinder.Find(liveNavLevel, navMeshSettings, navFinder, navTarget);
+            Check("nav mesh preview collects walkable cells",
+                navMeshPath.Success && navMeshPath.NavCells.Count > 10 && navMeshPath.NavCellSize > 0,
+                $"{navMeshPath.NavCells.Count} cell(s) at {navMeshPath.NavCellSize:0.##} m");
+            Check("nav mesh preview lists the walls the planner watches",
+                navMeshPath.WatchWalls.Count > 0 && navMeshPath.WatchWalls.Count <= navMeshSettings.BlockingObjects,
+                $"{navMeshPath.WatchWalls.Count} watched wall(s)");
+            var quietNav = Pathfinder.Find(liveNavLevel, new PathfindingSettings { CellSize = 0.5f, AgentRadius = 0.35f, AgentHeight = 1.8f }, navFinder, navTarget);
+            Check("nav mesh overlay is off by default", quietNav.NavCells.Count == 0 && quietNav.WatchWalls.Count == 0, "no overlay data");
+            // Build the real overlay mesh; a bad quad or material would throw here.
+            Scene.ShowPath(navMeshPath, true);
+            Check("nav mesh overlay builds its mesh", navMeshPath.NavCells.Count > 0,
+                $"{navMeshPath.NavCells.Count} tile(s), {navMeshPath.WatchWalls.Count} watched wall(s)");
+            Scene.ClearPath();
+
+            // Triggers: the target list is a repeated field, so a hand-written level keeps
+            // every entry even past the retail editor's screen cap.
+            var triggerLevel = new GrabLevel { Title = "Trigger Bypass" };
+            var bigTrigger = new LevelNode { Kind = NodeKind.Trigger, Name = "Big Trigger", Position = new Vec3(0, 0.5f, 0), Scale = Vec3.One };
+            triggerLevel.AddNode(bigTrigger);
+            for (int i = 0; i < 24; i++)
+            {
+                var block = new LevelNode { Kind = NodeKind.Static, Name = "Linked " + i, Position = new Vec3(i, 0.5f, 1), Scale = Vec3.One, Material = 8 };
+                triggerLevel.AddNode(block);
+                bigTrigger.TriggerTargets.Add(new TriggerTarget { Kind = 3, Mode = 0, ObjectName = block.DisplayName });
+            }
+            triggerLevel.EnsureNames();
+            var triggerRead = LevelIO.Read(LevelIO.Write(triggerLevel));
+            var triggerBack = triggerRead.AllNodes().FirstOrDefault(n => n.Kind == NodeKind.Trigger);
+            Check("a trigger keeps more targets than the retail editor allows",
+                GrabLimits.TriggerTargetBudget > GrabLimits.MaxTriggerTargets && triggerBack != null &&
+                triggerBack.TriggerTargets.Count == 24,
+                $"{triggerBack?.TriggerTargets.Count ?? 0} targets, budget {GrabLimits.TriggerTargetBudget}");
+            var triggerReport = BuildValidator.Validate(triggerLevel);
+            Check("over-cap trigger targets are not an export blocker",
+                triggerReport.Issues.All(i => i.Category != "Trigger" || i.Kind != BuildIssueKind.Error),
+                string.Join(" | ", triggerReport.Issues.Where(i => i.Category == "Trigger").Select(i => i.Kind + ": " + i.Message)));
+
+            var gapLevel = new GrabLevel { Title = "Path Gap" };
+            gapLevel.AddNode(new LevelNode
+            {
+                Kind = NodeKind.Static, Name = "Start Island", Position = new Vec3(-4, -0.5f, 0),
+                Scale = new Vec3(6, 1, 6), Material = 8
+            });
+            var gapFinder = new LevelNode { Kind = NodeKind.Static, Name = "Gap Finder", Position = new Vec3(-4, 0.5f, 0), Scale = Vec3.One, Material = 8 };
+            var gapTarget = new LevelNode { Kind = NodeKind.Static, Name = "Gap Target", Position = new Vec3(4, 1.5f, 0), Scale = Vec3.One, Material = 8 };
+            gapLevel.AddNode(gapFinder);
+            gapLevel.AddNode(gapTarget);
+            var gapPath = Pathfinder.Find(gapLevel, new PathfindingSettings { CellSize = 0.5f, AgentRadius = 0.35f, MaxDropHeight = 1f }, gapFinder, gapTarget);
+            Check("A* reports an unreachable isolated target", !gapPath.Success, gapPath.Message);
+
+            var stepLevel = new GrabLevel { Title = "Path Step" };
+            stepLevel.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "Step Floor", Position = new Vec3(0, -0.5f, 0), Scale = new Vec3(14, 1, 6), Material = 8 });
+            stepLevel.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "Step", Position = new Vec3(0, 0, 0), Scale = new Vec3(2, 0.5f, 4), Material = 8 });
+            var stepFinder = new LevelNode { Kind = NodeKind.Static, Name = "Step Finder", Position = new Vec3(-4, 0.5f, 0), Scale = Vec3.One, Material = 8 };
+            var stepTarget = new LevelNode { Kind = NodeKind.Static, Name = "Step Target", Position = new Vec3(4, 0.5f, 0), Scale = Vec3.One, Material = 8 };
+            stepLevel.AddNode(stepFinder);
+            stepLevel.AddNode(stepTarget);
+            var stepPath = Pathfinder.Find(stepLevel, new PathfindingSettings { CellSize = 0.5f, AgentRadius = 0.3f, MaxStepHeight = 0.75f }, stepFinder, stepTarget);
+            Check("A* climbs a small step and keeps going", stepPath.Success && stepPath.Points.Any(p => p.Y > 0.2f),
+                stepPath.Success ? stepPath.Length.ToString("0.00") + " m" : stepPath.Message);
+
+            var liveSettings = new PathfindingSettings
+            {
+                CellSize = 0.5f, AgentRadius = 0.35f, AgentHeight = 1.8f, Speed = 6f,
+                Acceleration = 40f, RepathInterval = 0.1f, TargetPrediction = 0f,
+                ShowPathInEditor = false, ShowPathInPlay = false
+            };
+            var liveLevel = new GrabLevel { Title = "Path Runtime" };
+            liveLevel.AddNode(new LevelNode { Kind = NodeKind.Static, Name = "Runtime Floor", Position = new Vec3(0, -0.5f, 0), Scale = new Vec3(30, 1, 30), Material = 8 });
+            var liveFinder = new LevelNode { Kind = NodeKind.Static, Name = "Runtime Finder", Position = new Vec3(-6, 0.5f, 0), Scale = Vec3.One, Material = 8 };
+            var liveTarget = new LevelNode { Kind = NodeKind.Static, Name = "Runtime Target", Position = new Vec3(6, 0.5f, 0), Scale = Vec3.One, Material = 8 };
+            liveLevel.AddNode(liveFinder);
+            liveLevel.AddNode(liveTarget);
+            var runtime = new PathfinderRuntime(liveLevel, liveSettings, liveFinder, liveTarget);
+            for (int i = 0; i < 90; i++) runtime.Update(1f / 60f);
+            float firstX = liveFinder.WorldPosition.X;
+            liveTarget.Position = new Vec3(6, 0.5f, 7);
+            for (int i = 0; i < 120; i++) runtime.Update(1f / 60f);
+            Check("live pathfinder follows a moving target", runtime.Path.Success && firstX > -6f &&
+                Math.Abs(liveFinder.WorldPosition.Z) > 0.15f,
+                $"finder {liveFinder.WorldPosition}, target {liveTarget.WorldPosition}, {runtime.Status}");
+            Check("live pathfinder reaches the target region", runtime.Path.Success &&
+                (liveFinder.WorldPosition - liveTarget.WorldPosition).Length < 7f,
+                (liveFinder.WorldPosition - liveTarget.WorldPosition).Length.ToString("0.00") + " m");
+
+            var pathProject = ProjectIO.Clone(pathLevel);
+            pathProject.Pathfinding = pathSettings;
+            pathProject.Pathfinding.FinderId = pathFinder.EditorId;
+            pathProject.Pathfinding.TargetId = pathTarget.EditorId;
+            string pathProjectPath = Path.Combine(Path.GetTempPath(), "grabengine_pathfinding.grabproj");
+            ProjectIO.Save(pathProject, pathProjectPath);
+            var pathProjectRead = ProjectIO.Load(pathProjectPath);
+            Check("pathfinding settings survive project save/load",
+                pathProjectRead.Pathfinding.FinderId == pathFinder.EditorId &&
+                pathProjectRead.Pathfinding.TargetId == pathTarget.EditorId &&
+                Math.Abs(pathProjectRead.Pathfinding.CellSize - 0.5f) < 0.001f,
+                pathProjectRead.Pathfinding.FinderId);
+
+            bool pathStudioBuilt = true;
+            string pathStudioError = "";
+            try
+            {
+                var studio = new PathfindingWindow(null!, pathLevel, () => pathFinder,
+                    (_, _) => { }, () => { }, () => { });
+                studio.Close();
+            }
+            catch (Exception ex)
+            {
+                pathStudioBuilt = false;
+                pathStudioError = ex.Message;
+            }
+            Check("Pathfinding Studio builds its full UI", pathStudioBuilt, pathStudioError);
+
             Check("all GRAB shapes", ShapeInfo.All.Length >= 7, string.Join(", ", ShapeInfo.All.Select(s => s.Name)));
 
             var tone = SoundSynth.Render(440f, 2, 0.005f, 0.45f, 0.2f, 0.8f);
@@ -5382,7 +5877,7 @@ public class ParamsTest : CodeBlock
             var sharedSongBlocks = sharedSongLevel.AllNodes().Where(n => n.Kind == NodeKind.GASM).ToList();
             Check("music shared mode gates the timed score instead of firing every sound",
                 sharedSong.Triggers == sharedSong.Blocks + 1 && sharedSong.Blocks > 0 && sharedSongMaster != null &&
-                sharedSongMaster.TriggerSources.Count > 0 && sharedSongMaster.TriggerTargets.Count == Math.Min(sharedSongBlocks.Count, GrabLimits.MaxTriggerTargets) &&
+                sharedSongMaster.TriggerSources.Count > 0 && sharedSongMaster.TriggerTargets.Count == Math.Min(sharedSongBlocks.Count, GrabLimits.TriggerTargetBudget) &&
                 sharedSongMaster.TriggerTargets.All(t => t.Kind == 7 && t.TargetMode == 1 && t.ObjectId != 0) &&
                 sharedSongSlices.Count == sharedSong.Blocks &&
                 sharedSongSlices.Sum(t => t.TriggerTargets.Count) == sharedSong.Sounds &&
@@ -5402,7 +5897,7 @@ public class ParamsTest : CodeBlock
             var sharedSongSliceRead = sharedSongRead.AllNodes().Where(n => n.Kind == NodeKind.Trigger && !ReferenceEquals(n, sharedSongMasterRead)).ToList();
             Check("music shared start gate and slice links survive .level",
                 sharedSongMasterRead != null &&                sharedSongMasterRead.TriggerSources.Count > 0 &&
-                sharedSongMasterRead.TriggerTargets.Count == Math.Min(sharedSong.Blocks, GrabLimits.MaxTriggerTargets) &&
+                sharedSongMasterRead.TriggerTargets.Count == Math.Min(sharedSong.Blocks, GrabLimits.TriggerTargetBudget) &&
                 sharedSongMasterRead.TriggerTargets.All(t => t.Kind == 7 && t.TargetMode == 1 &&
                     sharedSongIds.Any(p => p.Key.Kind == NodeKind.GASM && p.Value == t.ObjectId)) &&
                 sharedSongSliceRead.Count == sharedSong.Blocks &&
@@ -5437,7 +5932,7 @@ public class ParamsTest : CodeBlock
             Check("speech shared mode gates the spoken score instead of firing every phoneme",
                 sharedSpeechImport.Triggers == sharedSpeechImport.Blocks + 1 && sharedSpeechImport.Blocks > 0 &&
                 sharedSpeechMaster != null &&                sharedSpeechMaster.TriggerSources.Count > 0 &&
-                sharedSpeechMaster.TriggerTargets.Count == Math.Min(sharedSpeechBlocks.Count, GrabLimits.MaxTriggerTargets) &&
+                sharedSpeechMaster.TriggerTargets.Count == Math.Min(sharedSpeechBlocks.Count, GrabLimits.TriggerTargetBudget) &&
                 sharedSpeechMaster.TriggerTargets.All(t => t.Kind == 7 && t.TargetMode == 1 && t.ObjectId != 0) &&
                 sharedSpeechSlices.Count == sharedSpeechImport.Blocks &&
                 sharedSpeechSlices.Sum(t => t.TriggerTargets.Count) == sharedSpeechImport.Sounds &&
@@ -5705,9 +6200,9 @@ public class ParamsTest : CodeBlock
             Check("neural C# compiles to valid GASM",
                 neuralCompile?.Success == true && neuralPages.Count > 0,
                 neuralCompile == null ? "no compile" : $"{neuralPages.Count} page(s)");
-            Check("neural GASM respects every Code Block limit",
-                neuralPages.All(p => p.Program.Instructions.Count <= GrabLimits.MaxInstructions &&
-                                     p.Connections.Count <= GrabLimits.MaxConnections),
+            Check("neural GASM fits the active Code Block mode",
+                FitsActiveGasmMode(neuralPages),
+                (EngineSettings.ExtendedGasm ? "extended: " : "split: ") +
                 string.Join(", ", neuralPages.Select(p => p.Program.Instructions.Count)));
 
             var neuralLoaded = ProjectIO.Deserialize(ProjectIO.Serialize(neuralLevel));
@@ -5738,8 +6233,8 @@ public class ParamsTest : CodeBlock
                 n.Kind == NodeKind.Static && n.Position.Y < -500f && n.Scale.X <= 0.1f &&
                 n.Generated && n.HideModel);
             Check("imported .level hides parked GASM buses",
-                parkedBuses > 0 && hiddenBuses == parkedBuses,
-                $"{hiddenBuses}/{parkedBuses} marked");
+                EngineSettings.ExtendedGasm ? parkedBuses == 0 : parkedBuses > 0 && hiddenBuses == parkedBuses,
+                $"{hiddenBuses}/{parkedBuses} marked, {parkedBuses} parked");
             var neuralExportedPlay = new PlaySession(neuralExported);
             for (int i = 0; i < 600; i++) neuralExportedPlay.Step(1f / 60f);
             var exportedBall = neuralExported.AllNodes().FirstOrDefault(n => n.Kind == NodeKind.Static && n.Shape == ShapeInfo.Sphere);
@@ -5863,9 +6358,9 @@ public class ParamsTest : CodeBlock
             Check("neural lab generated C# compiles to GASM",
                 labApply.Success && labPages.Count > 0,
                 labApply.Success ? labApply.Summary : labApply.Error);
-            Check("neural lab GASM respects Code Block limits",
-                labPages.All(p => p.Program.Instructions.Count <= GrabLimits.MaxInstructions &&
-                                  p.Connections.Count <= GrabLimits.MaxConnections),
+            Check("neural lab GASM fits the active Code Block mode",
+                FitsActiveGasmMode(labPages),
+                (EngineSettings.ExtendedGasm ? "extended: " : "split: ") +
                 string.Join(", ", labPages.Select(p => p.Program.Instructions.Count)));
 
             var signLevel = ProjectIO.Clone(labLevel);
@@ -5931,10 +6426,8 @@ public class ParamsTest : CodeBlock
                 runtimeApply.Success && runtimeApply.TrainerCompile?.Success == true &&
                 runtimeApply.Block != null && runtimeApply.TrainerBlock != null,
                 runtimeApply.Success ? runtimeApply.Summary : runtimeApply.Error);
-            Check("neural lab runtime tuner respects Code Block limits",
-                runtimePages.Concat(runtimeTrainerPages).All(p =>
-                    p.Program.Instructions.Count <= GrabLimits.MaxInstructions &&
-                    p.Connections.Count <= GrabLimits.MaxConnections),
+            Check("neural lab runtime tuner fits the active Code Block mode",
+                FitsActiveGasmMode(runtimePages.Concat(runtimeTrainerPages).ToList()),
                 $"controller {runtimeApply.Instructions} / trainer {runtimeApply.TrainerInstructions} instructions, " +
                 $"{runtimeApply.WeightBuses} weight bus(es)");
             var runtimePlay = new PlaySession(runtimeLevel);

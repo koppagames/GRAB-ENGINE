@@ -50,6 +50,11 @@ public static class ProjectIO
     {
         var level = JsonSerializer.Deserialize<GrabLevel>(json, Options) ?? GrabLevel.CreateDefault();
         if (level.Nodes.Count == 0) level.Nodes.AddRange(GrabLevel.CreateDefault().Nodes);
+        // Older builds stamped 3.0 specularity onto every block, which is why GRAB's block
+        // inspector showed each one as the "Specularity" shading mode instead of "Default".
+        // Nobody chose that value (it was the default), so restore the default on load.
+        foreach (var node in level.AllNodes())
+            if (node.SpecularBrightness == 3f) node.SpecularBrightness = 0f;
         level.RebuildParents();
         level.EnsureLayers();
         level.EnsureNames();

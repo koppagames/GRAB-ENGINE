@@ -1,4 +1,4 @@
-# GRAB ENGINE
+﻿# GRAB ENGINE
 
 A Unity-style level editor and **C# → GASM compiler** for the Steam game **GRAB**.
 
@@ -259,8 +259,10 @@ dotnet publish src\GRABEngine -c Release -o app
 
 * Supports classes, structs, interfaces, inheritance, generics, `List<T>` / `Dictionary<K,V>`
   with `foreach`, `try` / `catch` / `throw`, `using`, `lock`, `goto`, `yield` and
-  `async` / `await`; see [CSharpReference.md](CSharpReference.md). Scripts are split into
-  linked continuation Code Blocks when they exceed GASM's instruction or connection limits.
+  `async` / `await`; see [CSharpReference.md](CSharpReference.md). Scripts compile to one Code
+  Block by default, even past the retail editor's 150-instruction / 10-connection caps (see
+  **GRAB's real limits** below); switch **Tools → Script Compiler** to split mode to get linked
+  continuation Code Blocks instead.
 
 * Creates real scene objects from code with `new Sign("Score")`, `new Cube(Material.Wood)`,
   `new Light(...)`, `new Trigger(...)` and object initializers. Objects are baked into the
@@ -275,8 +277,8 @@ dotnet publish src\GRABEngine -c Release -o app
   bools, chars, vectors and colors.
 
 * Arrays and collections are expanded into registers, lambdas and recursion are diagnosed
-  instead of miscompiled, and scripts that exceed GASM's limits are split into linked
-  continuation Code Blocks automatically on export.
+  instead of miscompiled. With split mode enabled in **Tools → Script Compiler**, scripts over
+  GASM's editor caps become linked continuation Code Blocks automatically.
 
 * In-editor help viewer for this README, `CSharpReference.md` and `GASMReference.md`.
 
@@ -324,6 +326,59 @@ edit every weight and bias, and connect real GRAB scene objects to the inputs an
 * **Autosave/undo and export.** Project save/load keeps the graph, settings, code blocks and bus
   objects. **Apply to Level** compiles both blocks, **Export .level** writes the real GRAB file, and
   the **C# preview** tab shows the exact controller and trainer source that go to the compiler.
+
+### Pathfinding Studio
+
+**Tools → Pathfinding Studio** (or the **Pathfind** toolbar button) adds a real 3D A* agent to
+the editor. Pick any **Finder** and **Target** object, press **Find Path**, then press
+**Test in Play Mode**.
+
+* A* searches standable voxel cells with the agent's radius and height, so real walls,
+  staircases, bridges and multiple floors are all handled. It never pathfinds through blocks.
+* Paths use octile diagonal costs, block corner-cutting, optionally smooth with line of sight,
+  and penalise hugging walls, producing practical shortest routes rather than grid staircases.
+* **Live route**: the studio recomputes while the Target moves. Play mode replans every
+  `Repath Interval` (or immediately when the target moves far enough), so a moving target is
+  followed from its **current** position. Target prediction can lead a fast target.
+* **Settings** cover cell size, agent radius/height, step-up, drop-down, ground/fly traversal,
+  diagonals, corner cutting, smoothing, wall-hug penalty, search iteration limit, repath rate,
+  target prediction, stop distance, speed, acceleration, turn speed, facing, waypoint radius and
+  nav-grid rebuild rate.
+* The green cube is the start, the orange ring is the destination, and cyan dots are real A*
+  waypoints. The route is drawn in the overlay viewport so it stays readable through geometry.
+* **Show nav mesh** draws the actual navigation grid used for the search: one translucent blue
+  tile per walkable cell around the route, plus an orange outline around every blocking object a
+  baked live planner would watch. It is off by default (the grid is not even collected until you
+  turn it on) and it shows exactly why a route goes the way it does.
+* Finder/target IDs and every setting are saved in the `.grabproj`. Play mode restores the
+  original scene when stopped.
+
+**Bake Route** compiles the current A* route into a visible Code Block. The block has real GASM
+Position connections to the Finder, so the baked motion ships in a normal `.level` export and
+runs in retail GRAB without the editor. Set **Loop the baked route** first to repeat it instead
+of stopping at the final waypoint.
+
+**Bake Live Nav** writes the re-planning kind of block. It connects the finder, the target and the
+**Blocking Objects** you choose — 1 to 96 walls, nearest to the straight line first, with the
+connection count not capped by the game — then every frame it reads their *current* positions, steers toward
+the target and resolves its own movement against the live wall boxes. When the straight line is
+blocked it **follows the wall**: at first contact it picks the end of *that* wall nearest the
+target, walks the blocked face all the way to that end without ever reversing along it, rounds the
+corner to the target's side, and only then cuts back toward the target. A target directly behind a
+wall is therefore reached by going around it instead of pushing into it, and a target past one end
+of a long wall is reached through that near end rather than by touring the wall. If the chosen way
+is walled off it hands over to the wall that blocked it and follows that one; after repeated jams
+it tries the other way around instead of standing still. Moving a wall, adding a wall, or running
+the target away is therefore handled inside the game — no re-bake, no frozen waypoint list. It is a
+continuous planner rather than a grid search on purpose: GASM indexes an array by expanding a
+comparison chain, so a 16 × 16 BFS field would cost thousands of instructions per frame, while the
+same search in the editor (`Find Path`) uses the editor's real A* on the full 3D voxel grid. Each
+watched object costs roughly 160 GASM instructions per frame, which is why 24 is the default and
+96 is the cap; the bake message reports the exact count for the block you just made.
+
+Both kinds of block are ordinary C# Code Blocks — editable, undoable, and exported with the
+level. Retail GRAB has no navmesh or A* opcode, which is exactly why the live version does its
+planning with plain arithmetic on object positions.
 
 ### Block brush
 
@@ -448,6 +503,34 @@ coalescing and a real editor scene edit).
 
 * Object references inside GASM are 64-bit ids assigned by deterministic scene traversal,
   so scripts must be recompiled after renaming/reordering objects. Export always compiles.
+
+## GRAB's real limits (editor vs. runtime)
+
+GRAB shows three numbers on its GASM screen: **150 instructions**, **10 object connections** and
+**480 registers** per Code Block. Those checks belong to that screen, not to the interpreter. The
+interpreter keeps instructions, connections and registers in dynamic arrays and a `.level` is
+loaded straight into them, so a program that is already longer than 150 still runs — the same way
+a hand-written custom register name survives loading, even though the screen would not let you type
+it.
+
+GRAB ENGINE therefore compiles **one extended Code Block** by default (`Tools → Script Compiler`).
+Nothing is split, there is no bus object and no per-frame page hand-off, and a script can use the
+whole budget it needs. Switch the mode off to get the old behaviour, where a long script becomes a
+chain of continuation Code Blocks that each stay inside the editor's caps.
+
+The live planner baked by Pathfinding Studio depends on this: it is a single Code Block with a few
+hundred instructions and one connection per wall it watches.
+
+**Trigger targets** work the same way. A trigger stores its target list as a repeated protobuf
+field, so the file has no maximum; the retail editor stops adding at 17 and its screen prints
+`Connections: n / 17`, but the loader and the runtime walk the whole list. **Extended trigger
+targets** (same window, on by default) lets one trigger START a whole song or a whole scene, and
+the audio importers connect every scheduler instead of the first 17. Build Validation then reports
+an information line instead of an error.
+
+Still enforced by the game itself (Build Validation reports these): 4-character connection names,
+20 transparent blocks, 100 physics groups, 10 spawn points, 1000 animation frames per object and a
+150-character sign limit.
 
 ## Notes / limitations
 

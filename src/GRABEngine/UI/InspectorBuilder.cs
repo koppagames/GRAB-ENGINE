@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -225,7 +225,7 @@ public static class InspectorBuilder
                 {
                     Text(host, MaterialInfo.Display(n.Material) + " uses its own fixed texture colour. GRAB only paints the Default Colored material.");
                 }
-                FloatField(host, "Specular", n.SpecularBrightness, 0, 10, 0.1f, 2, v => { n.SpecularBrightness = v; ctx.Changed(); });
+                FloatField(host, "Specularity", n.SpecularBrightness, 0, 10, 0.1f, 2, v => { n.SpecularBrightness = v; ctx.Changed(); });
                 CheckField(host, "Neon", n.IsNeon, v => { n.IsNeon = v; ctx.Changed(); });
                 CheckField(host, "Transparent", n.IsTransparent, v => { n.IsTransparent = v; ctx.Changed(); });
                 CheckField(host, "Additive", n.IsAdditive, v => { n.IsAdditive = v; ctx.Changed(); });

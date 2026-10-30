@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -394,7 +394,8 @@ public static class LevelOptimizer
             Math.Abs(parent.WorldRotation.X) > 0.0005f || Math.Abs(parent.WorldRotation.Y) > 0.0005f ||
             Math.Abs(parent.WorldRotation.Z) > 0.0005f)) return 0;
 
-        double grid = Math.Clamp(options.MixedSizeGrid, 0.1, 4.0);
+        // Any grid the user types; CellsFor skips a block that would need too many cells.
+        double grid = Math.Clamp(options.MixedSizeGrid, 0.05, 32.0);
         int removed = 0;
         var candidates = list.Where(n => CanMergeMixed(n, options)).ToList();
         foreach (var group in candidates.GroupBy(n => MergeKey(n, includeScale: false)))

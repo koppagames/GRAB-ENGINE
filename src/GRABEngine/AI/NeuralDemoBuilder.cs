@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -354,7 +354,7 @@ public static class NeuralDemoBuilder
         level.DefaultSpawnPointId = level.ObjectIdOf(start);
         level.EnsureNames();
 
-        var compiled = new CSharpCompiler().Compile(level, block, script);
+        var compiled = new CSharpCompiler { AllowExtendedGasm = EngineSettings.ExtendedGasm }.Compile(level, block, script);
         block.Compiled = compiled;
         if (!compiled.Success)
         {
